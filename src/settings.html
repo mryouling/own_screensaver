@@ -1,0 +1,752 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Foudre</title>
+<!-- Roboto Medium, only the letters of "Sign in with Google", for Google's branded sign-in button -->
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@500&text=Sign%20in%20with%20Google&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f5f4ef; --panel: #ffffff; --fg: #1f1e1d; --muted: #6f6b64; --line: #e6e2da; --soft: #f3eee8;
+  --accent: #d97757; --accent-ink: #ffffff; --accent-soft: rgba(217,119,87,.12);
+  --accent-fill: #ae4f2f; --accent-fill-hover: #9a4428; --accent-text: #a3462a; /* AA on white/cream */
+  --ok: #2f8f5b; --warn: #c98a1a;
+  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 10px 28px -16px rgba(0,0,0,.18);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1b1a19; --panel: #252422; --fg: #f0eee6; --muted: #a29e96; --line: #353330; --soft: #2e2b28;
+    --accent-soft: rgba(217,119,87,.18); --accent-text: #f2a587;
+    --shadow: 0 1px 2px rgba(0,0,0,.35), 0 12px 32px -16px rgba(0,0,0,.7);
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { background: var(--bg); }
+body {
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  color: var(--fg); background: var(--bg); -webkit-font-smoothing: antialiased;
+}
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; border: 0; background: none; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.wrap { max-width: 1040px; margin: 0 auto; padding: 22px 28px 36px; }
+header { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+.logo { width: 40px; height: 40px; flex: none; }
+.logo img { width: 40px; height: 40px; display: block; }
+header h1 { font-size: 19px; font-weight: 650; letter-spacing: -0.01em; }
+header p { color: var(--muted); font-size: 13px; }
+.head-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.status {
+  display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px;
+  background: var(--panel); border: 1px solid var(--line); font-size: 13px; white-space: nowrap;
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.idle { background: var(--ok); }
+.dot.working { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+.dot.waiting { background: var(--warn); animation: pulse 1s ease-in-out infinite; }
+.dot.off { background: #c0392b; }
+@keyframes pulse { 50% { opacity: .35; } }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 10px;
+  font-weight: 550; border: 1px solid var(--line); background: var(--panel); white-space: nowrap;
+  transition: background .15s ease, border-color .15s ease, transform .1s ease;
+}
+.btn:hover { background: var(--soft); }
+.btn:active { transform: scale(.97); }
+.btn.primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--accent-ink); }
+.btn.primary:hover { background: var(--accent-fill-hover); }
+.btn.ghost { border-color: transparent; background: none; color: var(--muted); }
+.btn.ghost:hover { color: var(--fg); background: var(--soft); }
+.btn:disabled { opacity: .45; pointer-events: none; }
+.btn[hidden] { display: none; }
+.btn svg { width: 15px; height: 15px; }
+
+.tips { padding: 2px 20px 8px; color: var(--muted); font-size: 13px; }
+.tips p + p { margin-top: 4px; }
+.tips b { color: var(--fg); font-weight: 600; }
+section {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+  padding: 18px 20px 20px; box-shadow: var(--shadow); margin-bottom: 16px;
+}
+.sec-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+.sec-head h2 { font-size: 15px; font-weight: 650; }
+.sec-head span { color: var(--muted); font-size: 13px; }
+
+/* themes */
+.themes { display: grid; grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr)); gap: 14px; }
+.theme { display: flex; flex-direction: column; justify-content: flex-start; /* buttons center their content: keep it at the top */
+  text-align: left; border-radius: 13px; padding: 6px; border: 2px solid transparent; transition: border-color .15s ease, background .15s ease; }
+.theme:hover { background: var(--soft); }
+.theme.active { border-color: var(--accent); background: var(--accent-soft); }
+.shot { position: relative; aspect-ratio: 16 / 10; border-radius: 9px; overflow: hidden; background: #111; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+.shot iframe { position: absolute; left: 0; top: 0; width: 1440px; height: 900px; border: 0; transform-origin: 0 0; pointer-events: none; }
+.theme .name { display: flex; justify-content: space-between; align-items: center; padding: 9px 4px 1px; font-weight: 600; }
+.theme .check { width: 18px; height: 18px; border-radius: 50%; background: var(--accent-fill); color: #fff; display: none; place-items: center; }
+.theme.active .check { display: grid; }
+.theme .check svg { width: 11px; height: 11px; }
+.theme .desc { padding: 0 4px 2px; color: var(--muted); font-size: 12px; }
+
+/* message */
+.composer { display: flex; gap: 10px; align-items: stretch; }
+.field { flex: 1; position: relative; }
+.field input {
+  width: 100%; height: 44px; padding: 0 64px 0 14px; border-radius: 11px; border: 1px solid var(--line);
+  background: var(--bg); font-size: 15px; outline: none; transition: border-color .15s ease, box-shadow .15s ease;
+}
+.picker { height: 34px; padding: 0 30px 0 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+  font: inherit; font-size: 13px; flex: none; max-width: 46%; }
+.picker:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.count { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.composer .btn { height: 44px; }
+.now { margin-top: 12px; display: flex; align-items: center; gap: 10px; min-height: 30px; color: var(--muted); font-size: 13px; }
+.now b { color: var(--fg); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60ch; }
+.now .live-chip { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--accent-text); background: var(--accent-soft); padding: 3px 8px; border-radius: 999px; }
+
+.presets-head { display: flex; align-items: center; justify-content: space-between; margin: 18px 0 10px; }
+/* "i" with a tooltip on hover or keyboard focus */
+.option .text .info { position: relative; display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 6px; vertical-align: 1px;
+  border-radius: 50%; border: 1px solid var(--muted); color: var(--muted); font: 600 10px/1 -apple-system, sans-serif; font-style: normal; cursor: help; }
+.option .text .info:hover, .option .text .info:focus-visible { color: var(--fg); border-color: var(--fg); }
+.option .text .info .tip { position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); width: 290px; z-index: 5; padding: 10px 12px;
+  border-radius: 10px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); color: var(--fg);
+  font: 400 12.5px/1.45 -apple-system, BlinkMacSystemFont, sans-serif; text-align: left; white-space: normal;
+  opacity: 0; visibility: hidden; transition: opacity .15s ease, visibility .15s; pointer-events: none; }
+.option .text .info:hover .tip, .option .text .info:focus-visible .tip { opacity: 1; visibility: visible; }
+.option .text .info .tip b { display: inline; font-weight: 600; }
+.presets-head h3 { font-size: 13px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
+.presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.preset {
+  position: relative; display: flex; align-items: center; min-height: 52px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--bg); transition: border-color .15s ease, background .15s ease, transform .1s ease;
+}
+.preset:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.preset.active { border-color: var(--accent); background: var(--accent-soft); }
+.preset .use { flex: 1; text-align: left; padding: 10px 6px 10px 14px; font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
+.preset .use:active { transform: scale(.99); }
+.preset .tools { display: flex; gap: 2px; padding-right: 6px; opacity: 0; transition: opacity .15s ease; }
+.preset:hover .tools, .preset:focus-within .tools { opacity: 1; }
+.icon-btn { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: var(--muted); }
+.icon-btn:hover { background: var(--soft); color: var(--fg); }
+.icon-btn.danger:hover { color: #c0392b; }
+.icon-btn svg { width: 15px; height: 15px; }
+.empty { color: var(--muted); font-size: 13px; padding: 14px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; grid-column: 1 / -1; }
+
+/* options */
+.option { display: flex; align-items: center; gap: 16px; padding: 4px 0; }
+.option[hidden] { display: none; } /* display: flex would otherwise win over the hidden attribute */
+.option + .option { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 10px; }
+.option .text { flex: 1; }
+.option .text b { display: block; font-weight: 600; }
+.option .text span { color: var(--muted); font-size: 13px; }
+.switch { position: relative; width: 42px; height: 25px; flex: none; }
+.switch input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.switch span { position: absolute; inset: 0; border-radius: 999px; background: var(--line); transition: background .2s ease; pointer-events: none; }
+.switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 19px; height: 19px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .2s cubic-bezier(.22,1,.36,1); }
+.switch input:checked + span { background: var(--accent-fill); }
+.switch input:checked + span::after { transform: translateX(17px); }
+.switch input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+kbd { font: 12px ui-monospace, SFMono-Regular, monospace; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); background: var(--bg); }
+
+/* calendar */
+.feeds { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.feeds:empty { display: none; }
+.feed { display: flex; align-items: center; gap: 12px; padding: 10px 8px 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg); }
+.feed .ico { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-text); flex: none; }
+.feed .ico svg { width: 16px; height: 16px; }
+.feed .meta { flex: 1; min-width: 0; }
+.feed .meta b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed .meta span { color: var(--muted); font-size: 12.5px; }
+.feed .meta span.err { color: #c0392b; }
+.feed .icon-btn.armed { width: auto; padding: 0 10px; font-size: 12.5px; font-weight: 600; color: #fff; background: #c0392b; }
+.field input.url { padding-right: 14px; font-size: 14px; }
+.cal-error { margin-top: 8px; color: #c0392b; font-size: 13px; min-height: 0; }
+.cal-error:empty { display: none; }
+details.how { margin-top: 12px; border-radius: 12px; background: var(--soft); padding: 10px 14px; font-size: 13px; }
+details.how summary { cursor: pointer; font-weight: 600; color: var(--fg); }
+details.how ol { margin: 10px 0 2px 18px; display: grid; gap: 8px; color: var(--muted); }
+details.how ol b { color: var(--fg); font-weight: 600; }
+details.how p { margin-top: 8px; color: var(--muted); }
+#todayFold[hidden] { display: none; }
+.today ul { list-style: none; display: grid; gap: 2px; }
+.today li { display: flex; gap: 14px; align-items: center; padding: 6px 2px; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+.today li:last-child { border-bottom: 0; }
+.today li .tm { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; min-width: 9.5em; white-space: nowrap; }
+.today li .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.today li.past { opacity: .5; }
+.today li .live-chip { font-size: 10.5px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--accent-text); background: var(--accent-soft); padding: 2px 7px; border-radius: 999px; flex: none; }
+/* google */
+/* Google's "Sign in with Google" button as its branding guidelines specify: standard G logo, Roboto Medium 14/20,
+   40 px tall, 16 px side padding (Google's iOS size) with 10 px between logo and text, light (white, #747775 border, #1F1F1F text) or
+   dark (#131314, #8E918F border, #E3E3E3 text) to match the page. */
+.g-btn { display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 16px; border-radius: 4px;
+  border: 1px solid #747775; background: #fff; color: #1f1f1f; font: 500 14px/20px Roboto, -apple-system, sans-serif;
+  letter-spacing: .25px; transition: background .15s ease; }
+.g-btn:hover { background: #f7f8f8; }
+.g-btn:disabled { opacity: .38; pointer-events: none; }
+.g-btn svg { width: 20px; height: 20px; }
+@media (prefers-color-scheme: dark) {
+  .g-btn { background: #131314; border-color: #8e918f; color: #e3e3e3; }
+  .g-btn:hover { background: #1f1f20; }
+}
+.g-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+.g-row .hint { color: var(--muted); font-size: 13px; }
+.feed .ico.g { background: #fff; box-shadow: inset 0 0 0 1px var(--line); }
+.cals { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 16px; }
+.cals label { display: flex; align-items: center; gap: 9px; padding: 5px 2px; font-size: 13.5px; cursor: pointer; min-width: 0; }
+.cals label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cals label em { font-style: normal; color: var(--muted); font-size: 12px; flex: none; }
+.cals input { accent-color: var(--accent-fill); width: 15px; height: 15px; flex: none; }
+/* collapsible groups */
+/* Rows sit flush; the title's own padding gives equal space above and below it. */
+details.fold { border-top: 1px solid var(--line); }
+details.fold > summary {
+  list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 15px 2px; line-height: 1.2;
+  font-size: 13px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; user-select: none;
+}
+details.fold > summary::-webkit-details-marker { display: none; }
+details.fold > summary::before {
+  content: ""; width: 7px; height: 7px; flex: none; border-right: 1.6px solid currentColor; border-bottom: 1.6px solid currentColor;
+  transform: rotate(-45deg); transition: transform .2s cubic-bezier(.22,1,.36,1); margin: 0 3px 0 1px;
+}
+details.fold[open] > summary::before { transform: rotate(45deg); }
+details.fold > summary:hover { color: var(--fg); }
+details.fold > summary .meta { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 12.5px; }
+details.fold > .body { padding: 2px 0 6px; }
+details.fold.inner { margin-top: 14px; }
+.cal-opts { border-top: 1px solid var(--line); padding-top: 14px; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 22px; transform: translate(-50%, 16px); opacity: 0; pointer-events: none;
+  padding: 9px 16px; border-radius: 10px; background: #1f1e1d; color: #f0eee6; font-size: 13px; font-weight: 550;
+  box-shadow: 0 12px 30px -10px rgba(0,0,0,.5); transition: opacity .2s ease, transform .3s cubic-bezier(.22,1,.36,1);
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+.offline { display: none; text-align: center; padding: 60px 20px; color: var(--muted); }
+body.is-offline .offline { display: block; }
+body.is-offline main { display: none; }
+
+@media (max-width: 820px) { .themes { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* One theme: the card is a full-width preview, not a choice, so it doesn't look clickable. */
+.themes:has(> .theme:only-child) { grid-template-columns: minmax(0, 1fr); }
+.theme:only-child { cursor: default; }
+.theme:only-child:hover { background: var(--accent-soft); }
+@media (max-width: 560px) { .composer { flex-wrap: wrap; } .composer .btn { flex: 1; } header p { display: none; } }
+@media (prefers-reduced-motion: reduce) { .dot { animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><img alt="" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABgCAYAAADimHc4AAAAAXNSR0IArs4c6QAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAYKADAAQAAAABAAAAYAAAAACK+310AAAeEklEQVR4Ae2dCXBd1XnH7/6u9LQvlrVhyQs2JtgGmyQQh0BcIEAoNBRSgrN0SCBh2pk0TZrOpMyQZlKa0LSdKW1JphNo02wGQmbSrDDYLoSQYIiNg4JjBduy9tVPy9vuu/f2992np321JPsy1Z15uts5557z/77zbWeRoqweqwisIrCKwCoCqwiEDAHf91V+xr59+/SlVq2/v7+4s7MzSnnaUsta7vzqche4XOVlATPXWZbSWl5ePriUciHAJY6jaq6bOF5TUxNfSlnLnTd0HJFrYDqdLlZV95JEwjRzz8727DhKkev6F+u6Xni2ZaxUvtASwDSjpYpiXILY8JfaeMdxPE1z17iuay+1rOXOH0oCgLmpaUqdqma2qBxLbbRh6B5kNHU936DsJZe31PpMzB9KAjQ3N+chfurQwbamDS8ZMNdVClXVL1HVdOGBAweWrNQnArjU61ASoLi4OB+lWe/7XsrkWGojDUOppiNVqqpZXFdXt0qA+QBFTEQNQ2tQFD/f87z8+dLP997z/LWep5ak05miwsJCY7705/J96HqA2P26bpd5nrNO17V819VQxks7KKcWTWIZhmqMjFihIkCoKiMwX3XVVTby+gIsoDw4V0EZ1ywF/tOnT0s5lOeX6LrqRyJxUcQaIslbSrnLlTd0PQBgClIpb7Ou+xBCpQe46wDsrOU2ImctaqRGVfUCzzPTiLQI4J11ecsFfK6c0BFAUSJRTfPXZzKqC+daphlZPzQ0VJKr8GLPqVTqUsuyy9EpOuWmKT+vtbU1ND0/hARIFWD9NGqal7Ysg5+9NZFwLlws8JKenkM8Sdvt+06F5yn5mUzGMwwXotaFpt2h4YQcYD09A8XI/bXA16ZpehxRJNebenvjLb4/UqAoZpSf4nnDeLVWFaIcJa35mYzraFpmyPO0vkikuN/33VhHR1+RZVlXOI5bhOgZRLvTqyz0Ss+SfYuzYYiZ8oSKAE1NTWZpaVU5SrhS09Rmx0k97ThGD9x7QlWT21TVjhtGJpZKJW1dj2wF1Mt5t1FRvDWImFLLikZ03XDT6SSqIzMEIQE804j8R+kqEl11FSWtDA3ZodEBoSIAUU+cLr1MUdwiwNJ8396HOWpHImaNZWktyWSypb29O7V161bl2LFjrxHZfIpnJlyOeFEr4LDGdNqBKN5VmmZcZJp6PjoA8INw0igBLKWign6FeOJYcpxpJq5ezLNQEcBx8iJ5ea54rCYBtCjh41rbjvy1oqi7HcePYZr+qKxs7dcBrolGolCzh4D5+OOPn7r88stfxYv+ieumywwjsp0QxK3EgW6DGAXIf9qKCjBcp6enxygqKhI9QI84v0eoCGDb6QjgI350ZLS7gbGAB5Al1wEwJqm2FjFTD/jrent7v1xRUfFSDrpRThYw5Zck/WBzs9JeVTX0fCrl/gSl/nFE0iX0jGhenpmxrGJp9yoBcgDmzq5rItvVKpQuBPCIhpprkOE2gGLRuBq9oACwbwK77vb2ge6amtJTubwTz6MESfEsRd7vx2KxXzEmcLuiZHrjcd01DEfiS6GwhEJRiRx4gB3xPLdy9F5DbATg597DyQpiOw8FfTOi5L3i5ebezXaGGEnE0kldL//XkZGRo5pmSQ+xOzo6QqGIQyWCNE2DM7Vi4fjskTuPw+u6noKlU4uM/xi6IY48f6KysnJoPMX0K4ggYYdhedPV1aWZZimmbrJzespz/yRkPcCVHoBdPx34idAgzzXSXaLr5oOMGTyIvb914vu5rm3bdtLpYYveEIoeEBoCwPViq+NkqYXC5fMdiCcG2TNV6Ix78Jgf6emJ3UQZ8/ZoxpodeoSBWAqFMxYaAgC4imw3ZehwPvBz77FqFDxgEwvpSghxf1dX73ty72Y7J5MVmXTaz0CsubvZbAUs8/PQEKCpScE5kh7g5y0GG0nrOGlxrHaZpvUBTNQtc2E0OKi4pmnQCZY+1jzXdxb6LjQEwLnFU1UtCLBo2SxEQCcIEfAZ1DuPH+/IWVIBDjzPE4uJs8p3vEwmqUCIUByhIYCYha6bwuxUZcBk0eAw74c8fhle733FxXmfxDqqzhVCODsfzzdvdEDeJ2aU9v3Y4j+SK3AZz6EhgKJUi3kZBM2kfUIEpMQiQPLRBx69SCknCPdhYkO3UQY9SiH45uRzXdLQ0BAoaaa76KsiSJCZcACaSGUBKLBOGMcdwfE6wf38JtFYOb6CZQQRvBqCPjuYkohXTYEcQ0OJikymyKIXqAz0ZAoKChZR7tgHlv0iND2gKoAqEP9CCIFtkDDyUW680QcLbjzGERaVkvE8OyOZPM8YIf5ZVlBgyXCkkk6rwwT7gndyfz6P0BAAD1XiPa4AzsDJCCC+BCe/xP2i6kheRJl2ip7QJAM4nZ1+tLa28Ixp2kxLiReuWbNGi0SgDzbv+QQ+9+1FNS6XaSXOiUTCJa6P2FEyYN4MPk8B5BWClOiDhRzSU0gL5yuHUObrOH/IcQYjzc3NiDat0DTdmsrKrRYEMAcH6SMhOEJRCcEhk2nw8VKRz+4gdv3znIvA/jpxtqQTTBVDvAueyfOJPwQOw5EZZtX5N+PwVkUi3n1lZZU/ItD3eeJHF6ZSgxbfodgFUnWFiTSv677C3x8rfuNGxe/oIOas6YwnenQG80Z0gAlwEkRL4zwVYCVZQhDES4Y0cbBHkfqYlOoQBhOD+Xo51xVMQ2FYU2VoMr2H93i9ej06xWaAJhgGQydkiooWEO8Yq93KXYSGAFgn3tatl+IeufmMYu0FYqaRSORT7YCbH8tk/N/y7jKA3w0cmwE4wfM+gMXEVMSsFDklBOmk9xzm+Ys8ewWC7IlE7A+l0yl6lnNKJvtq2uqY8DSWOnjwoLdt27ZhgD4D58PBLuLIYwaDvgFlfC/YNjG7IQ2oEityAF8crVp+LroCYmnY/F6K/CnSyWzot0EEwLcuZVy4CaL8iBjQ64WFedEUwzSMtIXCDA2FJSDUAFC1uzu2HjzvA+Rr+F0KSPIKImhKbpI0slvCDvykd+iiH46iM74LES6AWO8nX7HkCYS8r/RS7g8ymcQ/VFdXHzt5UrHy8/t267rV2tV1+o2LL754bFxZ8pyPIzQiSBrP/H2sIPMw/EncRt0AwCwtyoINF8+Ij+gBfq9BuEczGSWD9fQxQJdeQllujDGD6207//W2tqHuggKlHLoV0kOSr732Wpa6M5Z67h6GxgqCc4nRWCmmofTC869yf2Q+GEgjFpAL4C6jYu2cfkpP+I30DJ6htM2NlFnL1PTdhpHeyCdKZXoi1lH89ttvD4UICg0BBOwhbBksHdV1HSwdd4RHhwkpzEcH3mcDqBDvBRzcAyjwQLQwaIN5mxGR1QChbkQU4eCpaIBhsYYW5lws4OtLSRIqAoht7nnpJD0AgLQtAHcCWQ5ZZlZVYskjqnjpBe1golYvaZ/GijoM5yuRSER6iOgQxgi8WDqt93ueHgrRkyPaQtgrl3bFz4WFnpdIqEkkCOaox+iY+g4YNYgFIVKmfV+g5z0vsFdHDzrMC4w6PgvoFwD+r9AJ36QX3EK4ug1PGD9CT0ejeaGIA0mVQ0UAMQ1VNYKMDkRIC+LncsAD4ung5wCnD6ADFO/UqTOleL11TMQqI//Tmpb/n0NDfScbGxuTHR29u01Tq6ScIlW1BokJOeP5z+9VqAjAbDenpaXD17RICfb7S3AxM5tnx0pMUeQ/nK5cH4lk6Dl+Kw9eqaxcO3WaSglJWfhtbMpk4r/3/VRoxFCodADgOchtBtm9nalU+iim56zyX/iWHkNQQiY5qAR39GYsoWMT5wjB8Sqz4pjsK/NcvE40zA2EOIqIvK6KIAFwhgPMPGa7ae8goJYgZPB9uPuDs/UCcdA4hlHWm1C8n+no6OnFBJUR93VIs4MMc36LuV7Xcf874kHrCG30pdPK4M6dO+eSaTNUa+UehUoE0UwQDaYeApaN4sx8H0A7+a2F2aehAAEIQegMriR/bBj+zyFWCjufmdVKI/fdlGEmk5ntpqmy6NtvIgTxIs7YAAXNbFZN+8LKPwgVAeBYC7BLAYuBea8ecG9Gzh/DJGWVuzppnqhAIzY+fzdDty8wlAMxTBFbf1dTU/U/8p4JvLLUFUdMq2Ac+McE9hj41/NOnjwpjsPsykUyn6MjVDoA8DFENQD14vgELCnSGiAGCtRrhwDTxIaIIPIQbvbwHzxC18puy4q8H0I2HDp0iL0h3HdhIe2hjMfBs5keUpTJpCFIceQc4TvvZ0LVA4hWrmElzLsBjFiOPwiocK66AWL0IzUGAJwF3FmTH+ClcUw7T385P3/Ns4lEJ0E4uziddnvr6tYy8da4KhotuJsxgROskCedXop5GmFcIS8vL7Hg2XfzIrjEBKEhQHt7ewUrIm8G/Lcj75MwvDEKdgHOFMOMEqYWMaMVy3N+Pj3kF4WF+c8h1wdLSqpFtgdHa2vPhbZt/Ski6h0k/ZKqOj0Q7A7KbEM/9DEgU8f34mHYvCkUImhwcLCCcP49gM9yJJmi6Msk3epRoCWwxjphlYXWXjdipB9CyDPxgbcnEpmHu7v7/qO9vWeXoI+JuR5L9lOk+WMIkGLB3nOAvh7C7SIOhK/gvGwYFnOH7PXHjx8/76LovFkDAGgye62cJafXw+H3Au4VAuxM1k7A1vxBGRPr8RiMCRbk4S9ArawokkHeF0jxa8rdxfO3EwlFJ3ivoJQ/ytKmT9MTTCwjWdp0mEF6vbS0dH087tC7rI7a2rIevj1zvDv38RU6n2sCSFjBYAIt68Ai1+NKfQQLRoCXRXnC1XM2UwgkaThzGt94SZ7LgA1cHhCQaCjXyDBD+wahCawo9V6+9SyW7Jeqq8t/x32gSCijoLW1q5G8UbK3lZWV0cPOLSHOlQ4IgG9r668aGIjdiLkI8P5bJfi8EOBzVBHw5ZgI/ug9k63GB7eEEPSGbrzpFFbRXfQqE3E0hGgayYEv+biWAf+jp0+Lt+xsYglsPZN4T7Gn0AC9xN24caM4HxIMzGp+ybTMx4rrAEaerL6+eO3AwPDdtq09iRx+BFFyBYDoAloO1OVsF4BRnCxrVbZBs/UQms/InF9ftq4smLoVZn19cX9VVfkhekgXhsCf9PbG9paWrrmDlTfvbWlpuej48T5Zt2w88MADy47XsoogKinlSSUN5DvhZL/KMKJ/xADLXYiEHcKZi+F4yjnbQ7pKnG+Kos7nPEw4+lvQ5XtEQl8SDodIQXeijhrcbrJi5iKso/fgO7w2PGw8F4kk0vBINXsM1WC3GtSbrRDMPt9Ptg4PDzsNDQ1B7+A70kOyXfMsartkAoyCLgpVZiLLzlQXEXW8FKx3cr9TPFGpl0zFJK1cLukQ7p6tnCzni7QTTCY1TUbXHFbOM96sPouv8QR66AQesbJ9+66NpH8fGyvWM6L2ZHFx5ZHe3s7SaDSffSmcoWg0muzrizFz1a+jLXjWZgOMdJoNQFp9P8L+FYl2enIHRHSuvvpqmVq5qEZOquUCkZEWqszj0TZv3mxRwRq46w8wy6/lMVzk1YJzUSRijCnEBZY7JVmuatn20LAk38gAQoTvS++akj6Q6cQmfELRgcwpyiUQYsjPMEx+hsJeE78mzSP0jFqeI6b8k9S7BVFPEE9hw0AlARMxPucyfKn0Y2nh2PntrF9g34p86iDLaVMsKjewosw1EJD1zVobcaemI0d+2X3DDTfI9JnpFcxVaMI518oJj2a+FNChslVbW1sRi8Vr4CYCXNoOopZvIwBZR/SRCilSaThHKSF5sCJl5tLmfco+n0qcMji0fMoVYjIDTjlBPIc7CVF4QoixgkS8cdvDM0LY/hoAlkXdQQLADdoJ+KyO8Zh76g8IYJQfo5wR8kJQYqqu30Iw7yjPf4f33IXOkujqiOxHwZmlrVYdQ6ZMezTwW1SitgRONHPI99MDmYzpIL5E5A0mk/px9p1t27RpfotqXgLQIJ3YCi68WY87j0jxrwWUDcDQAOiYkwr2Nk4p9rhAI5jQ4FnFxBhiky6kGuNgApx0ZYBUiOH7MuutnB9bzvgtEOIMoedGAC7heqz+vCepmhY6cG1RD6rhMr6syBRGwhTBXFIBuAfvQeJLcL9sCKLA/RI5lcF6H1/Alxl3XZTPgm61GuJcQFp6k2yXEOzixWuFdCqElLb6TAJTmW2hDpD+N3SwV9Al5E+2ojsOISHEcZw18DfWgEl4CByUhpwswIK7nPyXUekquAQC6DtpJFZB8PEA7Kl5Z78XUSBlAwezw7Og0ZTRZ6P54HSXCVXBjLdCzgCotZJewhFrSJsSs5K09fxk5UuQDaAYSdPkJo4fgDjxm2mCzLaupdfIlsUyuFNB+gYImCejn5QndaAuUkTgBEovG+JeepKEPpjKaL7K1NTX8ZyPx2I9PQwYDT7//POB08bUFgWMZFfHavyNenb3qqF1axFlRF2FQC7hFOXwyZOpg1deWZ+Qr0w9ZiTA/v37jcsuu6IhHh++kgLhcnUDa68aqdQGYF9PxbPzQKaWNsu9NFIOKi+c4GJQpAFxmPKGKRvPVjxalfCyL96thAdsSc+1gCqhaDg64Mo3OMPhfiUNq+Y50dNA4Uq6M7xCOfrMD1IllsRkXR/OR1Cy8RPFWYBO+T5lqWx3oCBStCjE5bksdVWZrig6Rgl0DW0UfYMuUGLIeojndVHSEZT1UV1Pv8o6gw7K5DuTfQTCG0XRaEUpzTOj0RIbUXYt4xGtbW0tzzD18gx5shzDhRyTCCBt45nZ0tK50TTz6tgc6UJ4tRqut7Hbke3+rTRG9mAOMs/3h8pJqIA9YhgXSSa7+dyLNPAA1sarlNHGdMHYsWO93ubNFT76RSM4VjAwkLgIBb6B3rYOENYD1KXkxxw02MzVYf8IDxNSaaNsdkN066iDKE3RFx2kFRlcBnD0EJXds7xfoji/Az1/2dWV7Hac1jTfMBENFvnLkklnK/prD3luZBpLHeWYhC4kL8X60guEcLKNMivzFVG0OGSezF9t5v0R2zZ/yDcOEdYYprxZQWEn+EZ4CHPWYG5qofSssbRTCYC8Hyp1nAH30Ucfjd1772cvKCjIxFllOGxZeTK09w24SIJic2JPOro1Q1OmhThIHQG079q28cOSkpLfz5VRGADTMNLQ0BDt6RlkYMZlSzKf+UE+s9pUmEHZzJhuDY5VlN20ACUIyAW9EbEi30NMuWfguhdgmO84zsjBdevWdZJ3EtdNrANtq2T9GOUa7C/kX0O9WfSts57MwXNTZMBZegG9S5FwOPpBiOHJQkCsPZ5oyg8wSR+mTCYDVIpnPeO3aJvV2tpXWVdX3kWZMpIUHJMIkHs49XzmzBmIoj1E6PcjVJgtAsaV38S0FBzIVNz/ONwqMZevDwzEv7NpUzWKb2mHEKe1dbAUy2QbUuxGQLgJoNYjugQo5JB/Gs58mio83tvrvLRly9wbeMxUG76h4wXv4N09cPsfcr8GfQLIOd3lMQVG66Nd6AbtFIM7dExjO/eIQuXbxJP+heWwJ7mfVelO/e6CCHDihG8XFfXfhBj9BOJjCx+olYDX+CEV1BTZ5ZDnojAfi8cHv15fX982nmZhVzQ6qxKnyNapuRFVWGGJOxGR76JXHoWpvgkH/oa6jXHX1DxyL4TkmJFLc+llNK2xceOtgPppAnqX0qPETA1eC8vzTPQVRNeOQ/BfwZDEmaydnGX/iodisf6fbtq0aTBX3lznBREgV0B3d7esQvk4JulD2eBXljOQoygjj4UR2lMQ/2uEfF/P5VnIWUDB1M2z7dIKCIfnbJymq7bOlbetra/etvP8srK8dknH1PYG9mdSq6qq5hRzBNvYBs1GhEX629sLY7t2zc6ttHcTVtAXWdr0bnRDGUQAr3HaIfbQcRKB9U9ThWcgTgdEQJTJJGH/sYlTZKSOMx2LCi61tFSK+YVMzxAXEU4I9vXE6vCeRC7vraws/tQiwRfjPdLSEiMknH8XA+xfg7s+iUye0WTLNUDywOjvIq6zB5AqIR4OUup69OXbeTenhcb6YGbI6f9k28oX1607sxuxxrKmmf+3DJbO8aGhM/ewtcFXiAmdZDhTPNxcNegFLl51EEbHBDU+DCFuQ28dgTA4eAjGBRyLIsDOnXgfGYclRKYHF2ElSIw9fV9FRcndZWVFP1/A98aS7Nvn64BX1d8fuyUa9b+GZ/0wFb8aCyRvy5ZafS4gMRQK4bwdEOuvGEp40jDynmDRxSfhvM3EpPBQZz4o0yJcgPmpEtPRkfPGNyMR93MjI+m3HDrULj7FOLqjRTQ2Np6pqCh7EGOCQSP/GSwovGNDHEVSZH8CdTyebGU9GyNuxgd5fjXe8nqJBM9ck/Gn0z44/mr6FRU0+voGccr8zyJ3f9bVNbRv27Z1Y2Ox03PM/OTEiRN2fn4J+0OrH6cn3UljGEzPxvMBdgBOeoJ/OfJIMmmdrKsrSrCTissmG4HSefnll7Xa2sYLkbn3g8H7qVOg+FHKPjb6Y7atfoHIpogv4UBpH9HO/sjatVYkkfB2Iio/w+MrAQuzUkRIsJbgML364WRy5MfoLbGaZjTzEF9lkUjBXXx3L2brBgjO9vpuWszaeHzkfszdb0GKanTlLehKwiHuQ/QiUcozlifoLIoAkkEOiaffcccdASDZJwv7Kxz2xhsDRcXF3rvh3M/CiW+TbkxDxgoQzkLHyDrI01iyzyHpfs7imBbL8mNJAguRiG4DnsSfPgD2bwG4IK/IY5TiIQjxbSywJtn6mJkq2PBeOb1jE3r3Cr7/Vs44SbIJ4LiEkKnsHPgN/qOWpf47RG6+5pprZlXmeL9MbTHeA8h7gPBF6nsZPsXLDII+CuBiiiqIxQbCEMPY/RKKWF4CyAcWewj4LBOCg7zbAOtzVPwCopKzFoN+CSKXQhxABgxZ2aIQMlMBNVioFyzim1iA6CVhfLBlrpAvYgIGVylKAPYZNXNmDZ1IT5DsVPMp7Pq/O3Xq1JFdu3bNaU7yDQsHUmXkTOnr62tk49nf880580ysr1yfVQ+YWshC7qX72nbh7YD3t1RyTU7kLCRvFthsyhzn5s5T81P2pEezpZuUaPRG8kpvwKj4Kdx9/9GjR389V0+YqYzFPptc28XmXmB6QMjv6em/GSC/QiijdjHgL/ATy5YsRwR8gCfwpD+PWfsaz8bl1bJ9KVvQoqygs/n2fgJ7/f1DOxhJwqkxAd8JlGa282U953PYEac1QQCXnxxylh6DDuHafx8hsI8MDAyMDexMy7wMD1a8BxDGkH/GcD8z1T6AYo0j09M0kOWkCtNGUHksiaHRNs+IUkqLVozZJsGVBV2mrpgp9ESCKjl4sQywBGuSZQBG6oT/lbmzurpsP+kXJdsnfWyOmxWdlgKwZm/vANaHejVTRJ7GenkGC4SF1W4PlgN7/vsywrSdRksQjAlVKpNnXeq0skQQ8Pk+S2LdDiLjLzL4fkDTnGNYWYPs46Qnk+lGzOErCfxdxzbHf97W1tYEhnN65nNgPOerFe0BbDFfUVhY+hfMx2kG/Fl3uJVgHxNzb8Gx+jNqu53YS0CELJeO138xPWRqXilFxIuIO8CXUa+n8Rv+ee3akl+QdkZzTP4JKAMtf8NoxX8ND5c+s5AhxvHaLuxqxQhAAzVMs2p8t7WVlSUvz1cd8RrLy6veSdf/RwCRgXI22TYIBavi/ovJaeL8RRBhQhwJYcxYJEnlOaLFIFyiI140mbYoQ48W3J4n5iZ5v0f1PldZWXRc0s5Y0OjDwUG/PJXqfQtm6UuYpTI+sKzHihFAailRxfls6YmtgWCIIHUvfsKDKOtmwPsZ4uu3yGabZ+sB7nKAvYhzOYRAZ0zGTsDHQSNepfYQMmG1vYJjlmYg3xYCXoKYu5Y8Mr770aamV/cv1MQkT4AT5U/+4MTKn+X1ihJgsXWioTpEuAzdcCf/ouSrcOixiWVkRZWC96ncDRbvBH8JBQRtgNuJMytwqHoQUfZV7PgDU/8PMRbNDsIR19CpnmI07uTEss/XddgIEEx9YeTMmiuUyxR0xqgjnwDsvRCAUTOBT2WGs/ffSK5/IxzQPBugQmTeyUDysnPzbN+c63moCDBXRae+I5K6kXk6fwn4e5EQspjjuwTw/n6R4fCpxa7eLwaBzs7ePbHY8P/GYiMvs3H3rYikNx1DYVG8eQ8G+l/Bb9iPUmXGhHqI3hAKsbIYRN/UBCDuf4ZesJ95N0Ys1sW0lzff8abrslMhZgRMZr3xv8EqZG7Om64HTG3P6v0qAqsIrCKwisD/HwT+D4BukGVcmXZJAAAAAElFTkSuQmCC"></div><!-- brand/agent-foudre-mark.png -->
+    <div>
+      <h1>Agent Foudre</h1>
+      <p>What your agents are up to, on your lock screen.</p>
+    </div>
+    <div class="head-actions">
+      <div class="status" id="status"><span class="dot"></span><span>Connecting…</span></div>
+      <button class="btn primary" id="preview">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5"/><path d="M5.5 14h5M8 11.5V14"/></svg>
+        Preview lock screen
+      </button>
+    </div>
+  </header>
+
+  <div class="offline">
+    <h2>The lock screen server isn't running</h2>
+    <p>Quit and reopen Agent Foudre to start it. This window reconnects on its own.</p>
+  </div>
+
+  <main>
+    <section>
+      <div class="sec-head"><h2>Theme</h2><span>Live preview.</span></div>
+      <div class="themes" id="themes"></div>
+    </section>
+
+    <section>
+      <div class="sec-head"><h2>Away message</h2><span>Let people know when you'll be back.</span></div>
+      <div class="composer">
+        <div class="field">
+          <input id="msg" dir="auto" maxlength="140" placeholder="Back in 10, grabbing coffee…" autocomplete="off" spellcheck="true">
+          <span class="count" id="count">0/140</span>
+        </div>
+        <button class="btn primary" id="show">Show</button>
+        <button class="btn" id="savePreset">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M8 1.8l1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z"/></svg>
+          Save
+        </button>
+      </div>
+      <div class="now" id="now"></div>
+
+      <div class="presets-head"><h3>Presets</h3></div>
+      <div class="presets" id="presets"></div>
+    </section>
+
+    <section>
+      <div class="sec-head"><h2>Calendar</h2><span>Your current and next meeting.</span><button class="btn ghost" id="calSync" hidden style="margin-left:auto">Sync now</button></div>
+      <div id="google"></div>
+      <div class="cal-error" id="gError" role="alert"></div>
+
+      <details class="fold" id="otherFold" data-fold="other">
+      <summary>Other calendars<span class="meta" id="otherMeta">Apple, Outlook and others</span></summary>
+      <div class="body">
+      <div class="feeds" id="feeds"></div>
+      <div class="composer">
+        <div class="field"><input class="url" id="calUrl" type="url" placeholder="Paste your calendar's private link" autocomplete="off" spellcheck="false"></div>
+        <button class="btn primary" id="calAdd">Connect</button>
+      </div>
+      <div class="cal-error" id="calError" role="alert"></div>
+      <details class="how">
+        <summary>Where do I find this address?</summary>
+        <ol>
+          <li><b>Apple Calendar (iCloud):</b> in the Calendar app, Control-click the calendar → <i>Share Calendar…</i> → tick <b>Public Calendar</b> → copy the link.</li>
+          <li><b>Outlook:</b> Settings → Calendar → Shared calendars → <i>Publish a calendar</i> → copy the <b>ICS</b> link.</li>
+          <li><b>Google, without signing in:</b> calendar.google.com → Settings → your calendar → <i>Integrate calendar</i> → <b>Secret address in iCal format</b>.</li>
+        </ol>
+        <p>Anyone with the address can read that calendar, so it's stored only on this Mac and never shown on the lock screen. Work accounts sometimes have this address turned off by an admin.</p>
+      </details>
+      </div>
+      </details>
+      <details class="fold" id="todayFold" data-fold="today" hidden>
+        <summary>Today<span class="meta" id="todayMeta"></span></summary>
+        <div class="body today" id="today"></div>
+      </details>
+      <div class="cal-opts">
+        <label class="option">
+          <div class="text"><b>Show meeting names</b><span>Turn off to show only the times.</span></div>
+          <div class="switch"><input type="checkbox" id="calTitles"><span></span></div>
+        </label>
+      </div>
+    </section>
+
+    <section>
+      <div class="sec-head"><h2>Lock screen</h2></div>
+      <label class="option">
+        <div class="text"><b>Show details</b><span>Show each agent's tasks and project name.</span></div>
+        <div class="switch"><input type="checkbox" id="details"><span></span></div>
+      </label>
+      <label class="option">
+        <div class="text"><b>Use session names</b><span>Name each agent by its Claude session name. Off: by its folder.</span></div>
+        <div class="switch"><input type="checkbox" id="sessionNames"><span></span></div>
+      </label>
+      <label class="option">
+        <div class="text"><b>Show plan usage<span class="info" tabindex="0" role="button" aria-label="Where the usage numbers come from" aria-describedby="usageTip">i<span class="tip" role="tooltip" id="usageTip"><b>Fetched from Anthropic every 5 minutes</b> using the login Claude Code keeps in your Keychain, so it works with VS Code, the desktop app and Terminal.</span></span></b><span id="usageHint">Your Claude plan's 5-hour and weekly limits.</span></div>
+        <div class="switch"><input type="checkbox" id="showUsage"><span></span></div>
+      </label>
+      <label class="option" id="powerSaverPart" hidden>
+        <div class="text"><b>Save battery</b><span id="powerSaverHint">Uses less battery when your Mac isn't plugged in.</span></div>
+        <div class="switch"><input type="checkbox" id="powerSaver"><span></span></div>
+      </label>
+      <label class="option" id="alwaysOnPart" hidden>
+        <div class="text"><b>Always-on display</b><span>Keep the scene full screen on a display, like a second monitor. Press Esc on it to close.</span></div>
+        <select class="picker" id="alwaysOn" aria-label="Always-on display"></select>
+      </label>
+      <label class="option">
+        <div class="text"><b>Keep my Mac awake while agents work</b><span id="awakeHint">Your Mac won't fall asleep mid-task. The screen still locks.</span></div>
+        <div class="switch"><input type="checkbox" id="keepAwake"><span></span></div>
+      </label>
+    </section>
+
+    <div class="tips">
+      <p><b>Tip:</b> set a Hot Corner to Start Screen Saver in System Settings → Desktop &amp; Dock → Hot Corners.</p>
+    </div>
+  </main>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const THEMES = [
+  { id: "gotham", name: "Gotham", desc: "Night city, searchlight, pixel bat" },
+];
+const MAX = 140;
+let cfg = { theme: "gotham", customText: "", showDetails: true, showUsage: false, presets: [], calTitles: true, themes: THEMES.filter((t) => !t.hidden).map((t) => t.id) };
+let cal = { events: [], feeds: [] };
+let goog = { configured: false, connected: false, calendars: [] };
+let lastGoogle = "";
+let lastCal = "";
+let busy = 0; // skip server echoes right after a local change
+
+function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+const ICON = {
+  check: '<svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6.3l2.2 2.2 4.8-5"/></svg>',
+  edit: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 2.5l3 3-8 8H2.5v-3z"/></svg>',
+  google: '<svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>',
+  cal: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="11" rx="2"/><path d="M2 6.5h12M5.5 1.8v2.4M10.5 1.8v2.4"/></svg>',
+  trash: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4"/></svg>',
+};
+
+function toast(text) {
+  const t = $("#toast");
+  t.textContent = text; t.classList.add("show");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.classList.remove("show"), 1800);
+}
+
+async function save(patch, message) {
+  Object.assign(cfg, patch);
+  busy = Date.now();
+  render();
+  try {
+    const r = await fetch("/config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) });
+    if (!r.ok) throw new Error(r.status);
+    Object.assign(cfg, await r.json());
+    if (message) toast(message);
+  } catch {
+    toast("Couldn't save. Is the server running?");
+  }
+  render();
+}
+
+/* ---------- themes ---------- */
+// The server says which themes this user has (hidden ones unlock with the right Google account).
+let shownThemes = "";
+function buildThemes() {
+  const list = THEMES.filter((t) => (cfg.themes || []).includes(t.id));
+  if (list.map((t) => t.id).join() === shownThemes) return;
+  shownThemes = list.map((t) => t.id).join();
+  $("#themes").style.setProperty("--n", list.length);
+  $("#themes").innerHTML = list.map((t) => `
+    <button class="theme" data-id="${t.id}" aria-pressed="false">
+      <div class="shot"><iframe src="/?thumb&demo=working&theme=${t.id}" title="${t.name} preview" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="name">${t.name}<span class="check">${ICON.check}</span></div>
+      <div class="desc">${t.desc}</div>
+    </button>`).join("");
+  fitShots();
+}
+$("#themes").addEventListener("click", (e) => {
+  const b = e.target.closest(".theme");
+  if (b && b.dataset.id !== cfg.theme) save({ theme: b.dataset.id }, `Theme: ${THEMES.find((t) => t.id === b.dataset.id).name}`);
+});
+new ResizeObserver(fitShots).observe($("#themes"));
+function fitShots() {
+  document.querySelectorAll(".shot").forEach((s) => { s.querySelector("iframe").style.transform = `scale(${s.clientWidth / 1440})`; });
+}
+
+/* ---------- message + presets ---------- */
+function updateCount() {
+  const n = $("#msg").value.length;
+  $("#count").textContent = `${n}/${MAX}`;
+  $("#savePreset").disabled = !$("#msg").value.trim() || cfg.presets.includes($("#msg").value.trim());
+}
+function showMessage(text) {
+  const t = text.trim();
+  save({ customText: t }, t ? "Showing on your lock screen" : "Message cleared");
+}
+function renderPresets() {
+  const list = cfg.presets || [];
+  $("#presets").innerHTML = list.length ? list.map((p, i) => `
+    <div class="preset ${p === cfg.customText ? "active" : ""}" data-i="${i}">
+      <button class="use" dir="auto" title="Show this message">${esc(p)}</button>
+      <div class="tools">
+        <button class="icon-btn" data-act="edit" aria-label="Edit preset" title="Edit">${ICON.edit}</button>
+        <button class="icon-btn danger" data-act="del" aria-label="Delete preset" title="Delete">${ICON.trash}</button>
+      </div>
+    </div>`).join("") : `<div class="empty">No presets yet. Type a message and press Save.</div>`;
+}
+function renderNow() {
+  $("#now").innerHTML = cfg.customText
+    ? `<span class="live-chip">On screen</span><b dir="auto">${esc(cfg.customText)}</b><button class="btn ghost" id="clear">Clear</button>`
+    : `Nothing showing right now.`;
+}
+
+/* ---------- collapsible groups: each remembers whether you left it open ---------- */
+const folds = {
+  get(name, dflt) { try { const v = localStorage.getItem(`fold.${name}`); return v === null ? dflt : v === "1"; } catch { return dflt; } },
+  set(name, open) { try { localStorage.setItem(`fold.${name}`, open ? "1" : "0"); } catch {} },
+};
+document.addEventListener("toggle", (e) => {
+  const d = e.target;
+  if (d.matches && d.matches("details.fold[data-fold]")) folds.set(d.dataset.fold, d.open);
+}, true); // toggle doesn't bubble, so listen while it travels down
+
+/* ---------- calendar ---------- */
+const hhmm = (t) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+function ago(t) { const m = Math.floor((Date.now() - t) / 60e3); return m < 1 ? "just now" : m < 60 ? `${m} min ago` : `${Math.floor(m / 60)} h ago`; }
+function renderCalendar(force) {
+  const key = JSON.stringify(cal) + Math.floor(Date.now() / 30e3); // also refresh "x min ago" now and then
+  if (!force && (key === lastCal || lastCal === "frozen")) return;
+  lastCal = key;
+  const now = Date.now(), midnight = new Date(); midnight.setHours(24, 0, 0, 0);
+  const todays = cal.events.filter((e) => !e.allDay && e.start < midnight.getTime() && e.end > midnight.getTime() - 864e5);
+  renderGoogle();
+  $("#feeds").innerHTML = cal.feeds.filter((f) => f.kind !== "google").map((f) => {
+    const status = f.ok === null ? "Syncing…" : f.ok === false ? `<span class="err">${esc(f.error || "Couldn't sync")}</span>` : `Synced ${ago(f.syncedAt)}`;
+    return `<div class="feed" data-id="${esc(f.id)}"><span class="ico">${ICON.cal}</span>
+      <div class="meta"><b>${esc(f.name || f.host)}</b><span>${status}${f.name && f.name !== f.host ? ` · ${esc(f.host)}` : ""}</span></div>
+      <button class="icon-btn danger" data-act="remove" aria-label="Disconnect ${esc(f.name || f.host)}" title="Disconnect">${ICON.trash}</button></div>`;
+  }).join("");
+  $("#calSync").hidden = !cal.feeds.length;
+  $("#todayFold").hidden = !cal.feeds.length;
+  const left = todays.filter((e) => e.end > now), cur = left.find((e) => e.start <= now), nxt = left.find((e) => e.start > now);
+  $("#todayMeta").textContent = !todays.length ? "No meetings" : cur ? `In a meeting · ${left.length} left` : nxt ? `Next ${hhmm(nxt.start)} · ${left.length} left` : "All done";
+  $("#today").innerHTML = todays.length ? `<ul>${todays.map((e) => {
+    const live = e.start <= now && e.end > now;
+    return `<li class="${e.end <= now ? "past" : ""}"><span class="tm">${hhmm(e.start)} – ${hhmm(e.end)}</span><span class="nm">${esc(e.title)}</span>${live ? '<span class="live-chip">Now</span>' : ""}</li>`;
+  }).join("")}</ul>` : `<div class="empty">No meetings today.</div>`;
+  const ics = cal.feeds.filter((f) => f.kind !== "google").length;
+  $("#otherMeta").textContent = ics ? `${ics} connected` : "Apple, Outlook and others";
+}
+function feedStatus(f) {
+  if (!f || f.ok === null) return "Syncing…";
+  return f.ok === false ? `<span class="err">${esc(f.error || "Couldn't sync")}</span>` : `Synced ${ago(f.syncedAt)}`;
+}
+function renderGoogle(force) {
+  const f = cal.feeds.find((x) => x.kind === "google");
+  const key = JSON.stringify([goog, f && [f.ok, f.error, Math.floor((Date.now() - f.syncedAt) / 30e3)]]);
+  if (!force && (key === lastGoogle || lastGoogle === "frozen")) return;
+  lastGoogle = key;
+  let html;
+  if (goog.connected) {
+    const cals = goog.calendars || [];
+    html = `<div class="feed"><span class="ico g">${ICON.google}</span>
+      <div class="meta"><b>${esc(goog.email || "Google Calendar")}</b><span>${feedStatus(f)} · Google Calendar</span></div>
+      <button class="icon-btn danger" id="gOut" aria-label="Sign out of Google" title="Sign out">${ICON.trash}</button></div>
+      ${cals.length > 1 ? `<details class="fold inner" data-fold="gcals" ${folds.get("gcals", false) ? "open" : ""}>
+        <summary>Calendars to show<span class="meta">${cals.filter((c) => c.selected).length} of ${cals.length}</span></summary>
+        <div class="body"><div class="cals" id="gCals">${cals.map((c) => `<label><input type="checkbox" value="${esc(c.id)}" ${c.selected ? "checked" : ""}><span>${esc(c.name)}</span>${c.primary ? "<em>primary</em>" : ""}</label>`).join("")}</div></div>
+      </details>` : ""}`;
+  } else if (goog.configured) {
+    html = `<div class="g-row"><button class="g-btn" id="gIn">${ICON.google}Sign in with Google</button>
+      <span class="hint">Read-only. Opens in your browser.</span></div>`;
+  } else {
+    // Builds without a bundled Google client (google-client.json) can't offer Google sign-in.
+    html = `<div class="g-row"><button class="g-btn" disabled>${ICON.google}Sign in with Google</button>
+      <span class="hint">Not available in this version. Add a calendar link below instead.</span></div>`;
+  }
+  $("#google").innerHTML = html;
+}
+async function googlePost(action, body) {
+  $("#gError").textContent = "";
+  try {
+    const j = await calPost(`/google/${action}`, body);
+    if (j.google) goog = j.google;
+    if (j.calendar) cal = j.calendar;
+    renderCalendar(true); renderGoogle(true);
+    return j;
+  } catch (e) {
+    $("#gError").textContent = e.message === "Failed to fetch" ? "Couldn't reach the server" : e.message;
+    return null;
+  }
+}
+async function calPost(path, body) {
+  const r = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+async function connectCalendar() {
+  const url = $("#calUrl").value.trim();
+  if (!url) return $("#calUrl").focus();
+  $("#calError").textContent = "";
+  $("#calAdd").disabled = true; $("#calAdd").textContent = "Checking…";
+  try {
+    cal = await calPost("/calendars/add", { url });
+    $("#calUrl").value = "";
+    renderCalendar(true);
+    toast("Calendar connected");
+  } catch (e) {
+    $("#calError").textContent = e.message === "Failed to fetch" ? "Couldn't reach the server" : e.message;
+  }
+  $("#calAdd").disabled = false; $("#calAdd").textContent = "Connect";
+}
+
+/* ---------- status ---------- */
+function renderStatus(sessions, online) {
+  const el = $("#status");
+  if (!online) { el.innerHTML = `<span class="dot off"></span><span>Server offline</span>`; return; }
+  const now = Date.now();
+  const live = sessions.filter((s) => s.state !== "idle" && now - (s.updated_at || 0) < 45 * 60e3);
+  const waiting = live.filter((s) => s.state === "waiting").length;
+  const working = live.filter((s) => s.state === "working" || s.state === "thinking").length;
+  const [cls, text] = waiting ? ["waiting", `Claude needs you${waiting > 1 ? ` · ${waiting}` : ""}`]
+    : working ? ["working", `Claude is working · ${working} session${working > 1 ? "s" : ""}`]
+    : ["idle", "No agents running"];
+  el.innerHTML = `<span class="dot ${cls}"></span><span>${text}</span>`;
+}
+
+// Save battery: shown only on Macs with a battery; while it's on, says whether it's saving right now.
+function renderPowerSaver(b) {
+  $("#powerSaverPart").hidden = !b || !b.present;
+  if (!b || !b.present) return;
+  const base = "Uses less battery when your Mac isn't plugged in.";
+  $("#powerSaverHint").textContent = cfg.powerSaver !== false && b.onBattery ? `${base} On now.` : base;
+}
+
+// While it's on, says whether it's holding the Mac awake right now.
+function renderAwakeHint(a) {
+  const base = "Your Mac won't fall asleep mid-task. The screen still locks.";
+  const n = a ? a.working : 0;
+  $("#awakeHint").textContent = a && a.on && a.holding ? `On now: ${n === 1 ? "1 agent" : `${n} agents`} working. The screen still locks.` : base;
+}
+
+// Plan usage comes from Anthropic's usage API, read with Claude Code's own login (any Claude Code: VS Code, the desktop
+// app, Terminal), and from Claude Code's status line when you use it in Terminal.
+function renderUsageHint(u) {
+  const base = "Your Claude plan's 5-hour and weekly limits.";
+  const api = (u && u.api && u.api.status) || "off";
+  const extra = cfg.showUsage !== true ? " Turn it on to show it on the lock screen."
+    : u && (u.five_hour || u.seven_day) && api !== "expired" && api !== "no-login" ? ""
+    : api === "no-login" ? " Sign in to Claude Code on this Mac to see it."
+    : api === "expired" ? " Waiting for Claude Code to renew its login: use it once and this updates."
+    : api === "no-plan" ? " Only available on Pro, Max and Team plans."
+    : api === "offline" ? " Can't reach Anthropic right now. Retrying."
+    : api === "error" ? " Anthropic didn't answer. Retrying in a few minutes."
+    : " Loading…";
+  $("#usageHint").textContent = base + extra;
+}
+
+function render() {
+  buildThemes();
+  document.querySelectorAll(".theme").forEach((b) => {
+    const on = b.dataset.id === cfg.theme;
+    b.classList.toggle("active", on); b.setAttribute("aria-pressed", String(on));
+  });
+  renderNow();
+  renderPresets();
+  $("#details").checked = cfg.showDetails !== false;
+  $("#sessionNames").checked = cfg.sessionNames !== false; // on by default
+  $("#calTitles").checked = cfg.calTitles !== false;
+  $("#showUsage").checked = cfg.showUsage === true; // off by default
+  $("#keepAwake").checked = cfg.keepAwake === true; // off by default
+  $("#powerSaver").checked = cfg.powerSaver !== false; // on by default
+  updateCount();
+}
+
+// One request at a time, each given POLL_TIMEOUT_MS (a reply to an older request is dropped); while the server
+// is down, polls back off to every BACKOFF_MAX_MS.
+const POLL_TIMEOUT_MS = 3000, BACKOFF_MAX_MS = 5000;
+let polling = false, pollSeq = 0, pollFailures = 0, nextPollAt = 0;
+async function poll() {
+  if (polling || Date.now() < nextPollAt) return;
+  polling = true;
+  const seq = ++pollSeq, abort = new AbortController(), timer = setTimeout(() => abort.abort(), POLL_TIMEOUT_MS);
+  try {
+    const r = await fetch("/status", { cache: "no-store", signal: abort.signal });
+    if (!r.ok) throw new Error(r.status);
+    const j = await r.json();
+    if (seq !== pollSeq) return; // stale
+    pollFailures = 0; nextPollAt = 0;
+    document.body.classList.remove("is-offline");
+    if (Date.now() - busy > 2500) {
+      const before = JSON.stringify(cfg);
+      cfg = { ...cfg, ...j.config };
+      if (JSON.stringify(cfg) !== before) render();
+    }
+    renderStatus(j.sessions || [], true);
+    renderUsageHint(j.usage);
+    renderAwakeHint(j.awake);
+    renderPowerSaver(j.battery);
+    if (j.google) goog = j.google;
+    if (j.calendar) {
+      cal = j.calendar; renderCalendar();
+      if (!poll.foldsSet) { poll.foldsSet = true; $("#otherFold").open = folds.get("other", cal.feeds.some((f) => f.kind !== "google")); }
+    }
+  } catch {
+    if (seq !== pollSeq) return;
+    pollFailures++;
+    nextPollAt = Date.now() + Math.min(BACKOFF_MAX_MS, 1500 * 2 ** (pollFailures - 1)) - 50;
+    document.body.classList.add("is-offline");
+    renderStatus([], false);
+  } finally {
+    clearTimeout(timer);
+    if (seq === pollSeq) polling = false;
+  }
+}
+
+/* ---------- events ---------- */
+$("#msg").addEventListener("input", updateCount);
+$("#msg").addEventListener("keydown", (e) => { if (e.key === "Enter") showMessage($("#msg").value); });
+$("#show").addEventListener("click", () => showMessage($("#msg").value));
+$("#savePreset").addEventListener("click", () => {
+  const t = $("#msg").value.trim();
+  if (t) save({ presets: [t, ...cfg.presets.filter((p) => p !== t)] }, "Preset saved");
+});
+$("#now").addEventListener("click", (e) => { if (e.target.closest("#clear")) showMessage(""); });
+$("#presets").addEventListener("click", (e) => {
+  const card = e.target.closest(".preset");
+  if (!card) return;
+  const i = +card.dataset.i, text = cfg.presets[i], act = e.target.closest("[data-act]")?.dataset.act;
+  if (act === "del") return save({ presets: cfg.presets.filter((_, j) => j !== i) }, "Preset deleted");
+  if (act === "edit") { $("#msg").value = text; $("#msg").focus(); updateCount(); return; }
+  if (e.target.closest(".use")) { $("#msg").value = text; updateCount(); showMessage(text); }
+});
+$("#details").addEventListener("change", (e) => save({ showDetails: e.target.checked }, e.target.checked ? "Details on" : "Details off"));
+$("#sessionNames").addEventListener("change", (e) => save({ sessionNames: e.target.checked }, e.target.checked ? "Session names on" : "Folder names on"));
+$("#calAdd").addEventListener("click", connectCalendar);
+$("#calUrl").addEventListener("keydown", (e) => { if (e.key === "Enter") connectCalendar(); });
+$("#calUrl").addEventListener("input", () => ($("#calError").textContent = ""));
+$("#feeds").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-act=remove]");
+  if (!b) return;
+  const f = cal.feeds.find((x) => x.id === b.closest(".feed").dataset.id);
+  if (!f) return;
+  // The settings window has no dialogs, so the first click arms the button and the second confirms.
+  if (!b.classList.contains("armed")) {
+    b.classList.add("armed"); b.textContent = "Disconnect"; lastCal = "frozen";
+    clearTimeout(b.timer); b.timer = setTimeout(() => renderCalendar(true), 3500);
+    return;
+  }
+  try { cal = await calPost("/calendars/remove", { id: f.id }); renderCalendar(true); toast("Calendar disconnected"); } catch { toast("Couldn't reach the server"); }
+});
+$("#google").addEventListener("click", async (e) => {
+  if (e.target.closest("#gIn")) {
+    if (await googlePost("connect")) toast("Finish signing in in your browser");
+  } else if (e.target.closest("#gOut")) {
+    const b = e.target.closest("#gOut");
+    if (!b.classList.contains("armed")) {
+      b.classList.add("armed"); b.textContent = "Sign out"; lastGoogle = "frozen";
+      setTimeout(() => renderGoogle(true), 3500);
+      return;
+    }
+    if (await googlePost("disconnect")) toast("Signed out of Google");
+  }
+});
+$("#google").addEventListener("change", (e) => {
+  if (!e.target.closest("#gCals")) return;
+  const ids = [...document.querySelectorAll("#gCals input:checked")].map((i) => i.value);
+  googlePost("calendars", { ids }).then((j) => j && toast("Calendars updated"));
+});
+$("#calSync").addEventListener("click", async () => {
+  $("#calSync").disabled = true;
+  try { cal = await calPost("/calendars/sync"); renderCalendar(true); toast("Calendar synced"); } catch { toast("Couldn't reach the server"); }
+  $("#calSync").disabled = false;
+});
+// The "i" sits inside the switch's label: hovering or clicking it mustn't flip the switch.
+document.querySelectorAll(".info").forEach((el) => el.addEventListener("click", (e) => e.preventDefault()));
+$("#showUsage").addEventListener("change", (e) => save({ showUsage: e.target.checked }, e.target.checked ? "Plan usage on" : "Plan usage hidden"));
+$("#powerSaver").addEventListener("change", (e) => save({ powerSaver: e.target.checked }, e.target.checked ? "Saving battery on battery power" : "Full animation on battery"));
+$("#keepAwake").addEventListener("change", (e) => save({ keepAwake: e.target.checked }, e.target.checked ? "Keeping your Mac awake while agents work" : "Keep awake off"));
+$("#calTitles").addEventListener("change", (e) => save({ calTitles: e.target.checked }, e.target.checked ? "Meeting names on" : "Meeting names hidden"));
+// Always-on display: only in the app, which tells the page which displays are connected and which one is chosen
+// (window.setDisplays), and opens or closes the full-screen window when you pick one.
+window.setDisplays = ({ displays, current }) => {
+  const sel = $("#alwaysOn");
+  sel.innerHTML = `<option value="0">Off</option>` + displays.map((d) => `<option value="${esc(d.id)}">${esc(d.name)}</option>`).join("");
+  sel.value = String(displays.some((d) => d.id === current) ? current : 0);
+  $("#alwaysOnPart").hidden = false;
+};
+$("#alwaysOn").addEventListener("change", (e) => {
+  const app = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.alwaysOn;
+  if (app) app.postMessage(Number(e.target.value));
+  toast(e.target.value === "0" ? "Always-on display off" : `Showing on ${e.target.selectedOptions[0].textContent}`);
+});
+// Shows the lock screen without starting the real screensaver: a preview window in the app, or a new tab in a browser.
+$("#preview").addEventListener("click", () => {
+  const app = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.preview;
+  if (app) app.postMessage(null);
+  else window.open("/?preview=1", "_blank");
+});
+
+$("#todayFold").open = folds.get("today", false);
+render();
+poll().then(() => { $("#msg").value = cfg.customText || ""; updateCount(); });
+setInterval(poll, 1500);
+</script>
+</body>
+</html>

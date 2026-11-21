@@ -1,0 +1,1692 @@
+<!doctype html>
+<html lang="en" data-theme="gotham" class="fonts-wait">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Foudre</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Space+Grotesk:wght@400;500;700&family=VT323&display=swap" rel="stylesheet">
+<style>
+/* ---------- theme tokens ---------- */
+:root[data-theme="gotham"] {
+  --bg: #12141c; --fg: #e8e8ec; --muted: rgba(232,232,236,.58);
+  --accent-base: #9aa3b2; --warn: #e0b45c; --ok: #8fbf9a;
+  --card: rgba(255,255,255,.05); --card-border: rgba(232,232,236,.10); --card-shadow: 0 10px 40px -12px rgba(0,0,0,.45);
+  --head-font: "Space Grotesk", ui-sans-serif, sans-serif; --body-font: "Space Grotesk", ui-sans-serif, sans-serif;
+  --h-size: clamp(42px, 9vw, 126px); --h-weight: 700; --h-track: -0.035em; --em-style: normal;
+  --radius: 18px; --body-size: 15px;
+  /* De-emphasized text (finished tasks): dimmer than --muted but still ≥ 4.5:1 on a card over the night sky. */
+  --dim: #9a9ca4;
+  /* The canvas scene's colours. The scene reads these once (readPalette) instead of keeping its own copies. */
+  --sky-top: #12141c; --sky-low: #1a1b20; --ground: #15161b; --city: #20222a; --city-far: #1c1e26;
+  --window: #c9b98a; --beam: #cfd6e4; --star: #e8e8ec; --bat: #5a6070; --bat-eye: #e8e8ec; --bat-shadow: rgba(0,0,0,.25);
+}
+body { --accent: var(--accent-base); }
+body[data-state="waiting"] { --accent: var(--warn); }
+body[data-state="done"] { --accent: var(--ok); }
+
+/* ---------- base ---------- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: var(--body-size)/1.4 var(--body-font);
+  -webkit-font-smoothing: antialiased; user-select: none;
+}
+body.hide-cursor, body.hide-cursor * { cursor: none !important; }
+canvas#bg { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+/* Gotham's static sky and skyline: drawn once per size on their own layer, so they aren't redrawn every frame. */
+canvas#sky { position: fixed; inset: 0; width: 100%; height: 100%; display: none; }
+:root[data-theme="gotham"] canvas#sky { display: block; }
+
+/* Text waits for the theme's web fonts (see boot), so the layout, and which session cards fit, doesn't jump. */
+:root.fonts-wait #ui { opacity: 0; }
+#ui {
+  transition: opacity .25s ease;
+  position: fixed; inset: 0; z-index: 1; display: grid; grid-template-rows: auto 1fr;
+  padding: clamp(16px, 3vw, 40px) clamp(16px, 4vw, 56px);
+  padding-bottom: var(--lane); /* the bat's walking lane */
+  pointer-events: none;
+}
+:root { --side: clamp(16px, 4vw, 56px); --lane: clamp(84px, 11vh, 108px); }
+header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; letter-spacing: .01em; }
+.brand svg, .brand .mark { width: 22px; height: 22px; }
+.brand .x { color: var(--muted); font-weight: 400; }
+.clock { text-align: right; }
+.clock .time {
+  font: var(--h-weight) clamp(28px, 5vw, 64px)/1 var(--head-font);
+  font-variant-numeric: tabular-nums; letter-spacing: var(--h-track);
+}
+.clock .date { margin-top: 6px; color: var(--muted); font-size: clamp(11px, 1.1vw, 14px); letter-spacing: .12em; text-transform: uppercase; }
+.head-right { display: flex; flex-direction: column; align-items: flex-end; gap: clamp(12px, 1.8vh, 18px); flex: none; }
+
+/* ---------- calendar card ---------- */
+#cal {
+  width: clamp(220px, 21vw, 290px); padding: 12px 15px 13px; border-radius: var(--radius); text-align: left;
+  background: var(--card); border: 1px solid var(--card-border); box-shadow: var(--card-shadow);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+#cal:empty { display: none; }
+#cal .k { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; }
+#cal .k .when { margin-left: auto; letter-spacing: .02em; text-transform: none; font-weight: 500; font-variant-numeric: tabular-nums; }
+#cal .k .cdot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
+#cal.busy .k { color: var(--fg); }
+#cal.busy .k .cdot { background: var(--warn); animation: pulse 2.4s ease-in-out infinite; }
+#cal.soon .k .cdot { background: var(--accent-base); }
+#cal.soon .k .when { color: var(--accent-base); font-weight: 600; }
+#cal .ttl { margin-top: 5px; font-weight: 600; font-size: clamp(14px, 1.25vw, 17px); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+#cal .sub { margin-top: 3px; color: var(--muted); font-size: .88em; font-variant-numeric: tabular-nums; }
+#cal .bar { margin-top: 9px; height: 3px; border-radius: 3px; background: var(--card-border); overflow: hidden; }
+#cal .bar i { display: block; height: 100%; background: var(--warn); border-radius: inherit; }
+#cal .nx { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--card-border); display: flex; gap: 8px; color: var(--muted); font-size: .88em; }
+#cal .nx b { color: var(--fg); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+#cal .nx span { flex: none; font-variant-numeric: tabular-nums; }
+#cal.quiet { padding: 9px 14px; }
+
+/* ---------- plan usage card (Claude's 5-hour and weekly limits, from the status line) ---------- */
+/* Under the clock, out of the header's flow (like #sessions on the left), so the header's height, and
+   with it the centered headline and task list, doesn't change with how many cards there are. */
+.head-right { position: relative; }
+#cards {
+  position: absolute; right: 0; top: calc(100% + clamp(12px, 1.8vh, 18px));
+  display: flex; flex-direction: column; align-items: flex-end; gap: clamp(10px, 1.4vh, 14px);
+}
+
+#usage {
+  width: clamp(220px, 21vw, 290px); padding: 11px 15px 12px; border-radius: var(--radius); text-align: left;
+  background: var(--card); border: 1px solid var(--card-border); box-shadow: var(--card-shadow);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+#usage:empty { display: none; }
+#usage .k { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; }
+#usage .k .when { margin-left: auto; letter-spacing: .02em; text-transform: none; font-weight: 500; }
+#usage .row { margin-top: 8px; }
+#usage .l { display: flex; justify-content: space-between; gap: 10px; color: var(--muted); font-size: .88em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#usage .l b { color: var(--fg); font-weight: 600; }
+#usage .bar { margin-top: 5px; height: 4px; border-radius: 3px; background: var(--card-border); overflow: hidden; }
+#usage .bar i { display: block; height: 100%; background: var(--accent-base); border-radius: inherit; }
+#usage .row.high .bar i { background: var(--warn); }
+#usage .row.high .l b { color: var(--warn); }
+
+/* The headline sits in the middle row, so it's what's centered: the starburst above it, the rest below.
+   centerHeadline() then puts that middle on the screen's center line (the header and the crab's lane differ). */
+main {
+  display: grid; grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr); justify-items: center;
+  text-align: center; row-gap: clamp(8px, 1.6vh, 18px); min-height: 0;
+}
+#heroSlot { align-self: end; }
+main .below { align-self: start; display: flex; flex-direction: column; align-items: center; gap: clamp(8px, 1.6vh, 18px); }
+#heroSlot { width: clamp(96px, 20vmin, 230px); aspect-ratio: 1; flex: none; margin-bottom: clamp(4px, 2vh, 24px); }
+h1 {
+  font-family: var(--head-font); font-weight: var(--h-weight); font-size: var(--h-size);
+  line-height: 1.04; letter-spacing: var(--h-track); text-wrap: balance;
+}
+h1 em { color: var(--accent); font-style: var(--em-style); transition: color .6s ease; }
+#tagline { color: var(--accent); font-size: clamp(14px, 1.6vw, 20px); min-height: 1.5em; transition: color .6s ease; }
+#tagline .fade { display: inline-block; }
+/* ---------- message strip ---------- */
+.head-left { display: flex; flex-direction: column; align-items: flex-start; gap: clamp(10px, 1.6vh, 16px); min-width: 0; }
+#note {
+  max-width: min(62vw, 760px);
+  display: flex; align-items: center; padding: 12px 22px;
+  border-radius: var(--radius); background: var(--note-bg); color: var(--note-fg);
+  box-shadow: 0 14px 40px -16px rgba(0,0,0,.55); border: var(--note-border, 0);
+}
+#note[hidden] { display: none; }
+#msg { position: relative; font: var(--note-weight, 500) clamp(18px, 2.2vw, 30px)/1.25 var(--head-font); letter-spacing: -0.01em; }
+#msg .word { display: inline-block; white-space: nowrap; }
+#msg .ch { display: inline-block; transform-origin: 50% 100%; text-align: center; }
+canvas#fx { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
+:root[data-theme="gotham"] { --note-bg: rgba(232,232,236,.92); --note-fg: #12141c; --note-weight: 600; }
+#nowline {
+  display: inline-flex; align-items: center; gap: .65em; max-width: min(92vw, 760px);
+  padding: .6em 1.1em; border-radius: 999px;
+  background: var(--card); border: 1px solid var(--card-border); box-shadow: var(--card-shadow);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  font-size: clamp(13px, 1.3vw, 16px); white-space: nowrap;
+}
+#nowline:empty { display: none; }
+#nowline .txt { overflow: hidden; text-overflow: ellipsis; }
+#nowline .sep { color: var(--muted); }
+#nowline .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+.dot { width: .62em; height: .62em; border-radius: 50%; background: var(--accent); flex: none; }
+body[data-state="working"] .dot, body[data-state="waiting"] .dot { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 .45em color-mix(in srgb, var(--accent) 0%, transparent); transform: scale(.85); } 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); } }
+
+/* The agent's task list as a carousel of little cards under the headline: the current task lit, the next ones
+   fully readable after it, finished ones dimmed before it, and the row slides along as the agent moves to the
+   next task (stepCarousel). */
+#plan { width: min(92vw, 900px); }
+#plan:empty { display: none; }
+#plan .rail {
+  overflow: hidden; padding: 4px 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
+}
+#plan .track { display: flex; align-items: stretch; gap: 10px; width: max-content; will-change: transform; }
+#plan .tc {
+  display: flex; align-items: flex-start; gap: 8px; width: clamp(170px, 16vw, 230px); padding: 8px 13px; text-align: left;
+  border-radius: calc(var(--radius) * .75); background: var(--card); border: 1px solid var(--card-border);
+  font-size: clamp(12px, 1.15vw, 15px); line-height: 1.3; color: var(--muted);
+  transition: opacity .5s ease, transform .5s ease, border-color .5s ease;
+}
+#plan .tc .tx { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; } /* two lines, so a step's name reads in full */
+#plan .tc .ic { margin-top: .12em; }
+#plan .tc.pending { color: var(--fg); opacity: .82; }
+/* Dimmed with a colour that still reads (≥ 4.5:1), not by fading the whole card. */
+#plan .tc.completed { color: var(--dim); background: color-mix(in srgb, var(--card) 45%, transparent); border-color: color-mix(in srgb, var(--card-border) 45%, transparent); }
+#plan .tc.completed .ic { color: var(--dim); }
+#plan .tc.now { color: var(--fg); font-weight: 600; border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 22px -6px color-mix(in srgb, var(--accent) 55%, transparent); }
+#plan .tc.now .ic { color: var(--accent); }
+#plan .ic { width: 1.05em; height: 1.05em; flex: none; display: block; }
+#plan .meta { margin-top: 8px; color: var(--muted); font-size: .8em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Top left, under the brand and the message (in the middle of the left edge they covered wide headlines).
+   Out of the header's flow, so the header's height and the centered content don't move. */
+.head-left { position: relative; }
+#sessions {
+  position: absolute; left: 0; top: calc(100% + clamp(10px, 1.6vh, 16px));
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+}
+/* The message bat hangs from a letter down to ~0.82 × the message's font size below the strip; stay clear of it. */
+#note:not([hidden]) ~ #sessions { top: calc(100% + 10px + .85 * clamp(18px, 2.2vw, 30px)); }
+.sess {
+  width: 236px; padding: 12px 14px; border-radius: var(--radius); text-align: left;
+  background: var(--card); border: 1px solid var(--card-border); box-shadow: var(--card-shadow);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+#sessions .more { padding: 0 4px; color: var(--muted); font-size: .85em; }
+.sess .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.sess .p { font-weight: 600; overflow: hidden; white-space: nowrap; }
+.sess .p .mq { display: inline-block; } /* a long name slides (the frame loop moves it) */
+@media (prefers-reduced-motion: reduce) { .sess .p { text-overflow: ellipsis; } .sess .p .mq { display: inline; } }
+/* The session the middle of the screen is showing (its step and task list). */
+.sess.focus {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), 0 0 26px -4px color-mix(in srgb, var(--accent) 45%, transparent), var(--card-shadow);
+}
+.sess.focus .p { color: var(--accent); text-shadow: 0 0 14px color-mix(in srgb, var(--accent) 70%, transparent); }
+.sess .a { margin-top: 3px; color: var(--muted); font-size: .9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess .tm { margin-top: 2px; color: var(--muted); font-size: .82em; font-variant-numeric: tabular-nums; }
+.chip { flex: none; font-size: 11px; font-weight: 600; letter-spacing: .04em; padding: 2px 8px; border-radius: 999px; color: var(--chip-ink, var(--bg)); background: var(--chip, var(--accent-base)); }
+.chip.waiting { --chip: var(--warn); }
+.chip.done { --chip: var(--ok); }
+.chip.idle { --chip: var(--card-border); --chip-ink: var(--fg); }
+
+#alert { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .5s ease; box-shadow: inset 0 0 140px 12px var(--warn); }
+body[data-state="waiting"] #alert { animation: alert 1.8s ease-in-out infinite; }
+@keyframes alert { 0%, 100% { opacity: .15; } 50% { opacity: .65; } }
+
+/* ---------- theme specifics ---------- */
+@keyframes blink { 50% { opacity: 0; } }
+
+/* ---------- picker ---------- */
+#picker {
+  position: fixed; left: 50%; bottom: 16px; z-index: 10; width: min(680px, calc(100vw - 32px));
+  transform: translate(-50%, calc(100% + 24px)); opacity: 0;
+  transition: transform .45s cubic-bezier(.22, 1, .36, 1), opacity .3s ease;
+  padding: 14px; border-radius: 16px; color: #f4f4f5;
+  background: rgba(18, 18, 20, .82); border: 1px solid rgba(255,255,255,.1);
+  box-shadow: 0 20px 50px -12px rgba(0,0,0,.55);
+  backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  font: 13px/1.4 ui-sans-serif, -apple-system, sans-serif; pointer-events: auto; user-select: auto;
+}
+#picker.show { transform: translate(-50%, 0); opacity: 1; }
+#picker .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+#picker .row + .row { margin-top: 10px; }
+#picker .lbl { color: rgba(244,244,245,.55); margin-right: 2px; }
+#picker button, #picker input[type="text"] {
+  font: inherit; color: inherit; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06);
+  border-radius: 10px; padding: 7px 11px;
+}
+#picker button { cursor: pointer; transition: background .15s ease, transform .1s ease; }
+#picker button:hover { background: rgba(255,255,255,.12); }
+#picker button:active { transform: scale(.97); }
+#picker button[aria-pressed="true"] { background: #f4f4f5; color: #111; border-color: #f4f4f5; }
+#picker input[type="text"] { flex: 1; min-width: 200px; outline: none; }
+#picker input[type="text"]:focus { border-color: rgba(255,255,255,.4); }
+#picker .tog { display: flex; align-items: center; gap: 6px; margin-left: auto; color: rgba(244,244,245,.75); cursor: pointer; }
+#picker .hint { margin-top: 10px; color: rgba(244,244,245,.45); font-size: 12px; }
+#picker .hint b { color: rgba(244,244,245,.75); font-weight: 500; }
+
+@media (max-width: 640px) {
+  #cal, #usage { display: none; }
+  #note { max-width: 100%; }
+  #sessions { width: calc(100vw - 2 * var(--side)); }
+  .sess { width: 100%; }
+  #sessions .sess:nth-child(n+3) { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #alert, .dot, #cal .cdot { animation: none !important; }
+}
+</style>
+</head>
+<body data-state="idle">
+<canvas id="sky"></canvas>
+<canvas id="bg"></canvas>
+<div id="alert"></div>
+<div id="ui">
+  <header>
+    <div class="head-left">
+      <div class="brand" id="brand"></div>
+      <div id="note" hidden><div id="msg"></div></div>
+      <div id="sessions"></div>
+    </div>
+    <div class="head-right">
+      <div class="clock"><div class="time" id="time">--:--</div><div class="date" id="date"></div></div>
+      <div id="cards"><div id="cal" aria-live="polite"></div><div id="usage"></div></div>
+    </div>
+  </header>
+  <main>
+    <div id="heroSlot"></div>
+    <h1 id="headline">claude is <em>working</em></h1>
+    <div class="below">
+      <div id="tagline"></div>
+      <div id="nowline"></div>
+      <div id="plan"></div>
+    </div>
+  </main>
+</div>
+<canvas id="fx"></canvas>
+
+<div id="picker" aria-label="Lock screen settings">
+  <div class="row">
+    <input type="text" id="customInput" dir="auto" maxlength="140" placeholder="Custom message, e.g. Back in 10, grabbing coffee">
+    <button id="saveText">Set</button>
+    <button id="clearText">Clear</button>
+  </div>
+  <div class="row" id="demoBtns">
+    <span class="lbl">Preview</span>
+  </div>
+  <div class="hint"><b>D</b> cycle preview states · <b>H</b> hide details · <b>F</b> fullscreen · <span id="conn"></span></div>
+</div>
+
+<script>
+"use strict";
+const TAU = Math.PI * 2;
+const $ = (s) => document.querySelector(s);
+const qs = new URLSearchParams(location.search);
+const SCREENSAVER = qs.has("screensaver");
+// The app's always-on display mode: the scene full screen on a display, all the time. No controls there either.
+// "preview" is the app's Preview lock screen window: the same scene in an ordinary window, cursor kept.
+const PREVIEW = qs.has("preview");
+const KIOSK = SCREENSAVER || qs.has("display") || PREVIEW;
+// Called by the screensaver: true while macOS shows its lock screen (with its own clock) on top of us.
+// Our clock fades out and the calendar card glides up into its place, then both reverse. It's all
+// transforms, so nothing else on the page moves. Progress is computed from elapsed time, and is
+// stepped by the frame loop plus a backup timer: web views can starve requestAnimationFrame while
+// another window covers them, and the animation must still end on time. A change mid-way reverses
+// from wherever it is.
+const LOCK_UI_MS = 1100;
+const lockUI = { from: 0, to: 0, start: 0, ms: 0, dist: 0, shown: -1 };
+function lockUIProgress(now = performance.now()) {
+  if (!lockUI.ms) return lockUI.to;
+  return lockUI.from + (lockUI.to - lockUI.from) * Math.min(1, (now - lockUI.start) / lockUI.ms);
+}
+window.setSystemLockUI = (on) => {
+  if (qs.has("display")) return; // the always-on display: macOS never draws its sign-in over it, so no crawl, no clock swap
+  const now = performance.now(), p = lockUIProgress(now), to = on ? 1 : 0;
+  if (to === lockUI.to) return;
+  if (to && p === 0) lockUI.dist = calOffset();
+  Object.assign(lockUI, { from: p, to, start: now, ms: REDUCED ? 0 : LOCK_UI_MS * Math.abs(to - p) });
+  stepLockUI();
+};
+function calOffset() {
+  const clock = $(".clock").getBoundingClientRect(), cards = $("#cards").getBoundingClientRect();
+  return cards.height ? cards.top - clock.top : 0;
+}
+const easeInOutCubic = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+let lockUITimer = 0;
+function stepLockUI() {
+  const p = lockUIProgress();
+  // Backup for when requestAnimationFrame is starved, running only while the clock and cards move.
+  if (p !== lockUI.to && !lockUITimer) lockUITimer = setInterval(stepLockUI, 16);
+  else if (p === lockUI.to && lockUITimer) { clearInterval(lockUITimer); lockUITimer = 0; }
+  if (p === lockUI.shown) return;
+  lockUI.shown = p;
+  fitNoteToLockUI(p);
+  const clock = $(".clock"), cal = $("#cards"); // the calendar and usage cards move together
+  if (!p) { clock.style.opacity = clock.style.transform = clock.style.visibility = cal.style.transform = ""; return; }
+  const fade = easeInOutCubic(clamp(p / 0.6, 0, 1)); // the clock is gone before the card arrives, and reappears after it leaves
+  clock.style.opacity = String(1 - fade);
+  clock.style.transform = `translateY(${(-10 * fade).toFixed(2)}px)`;
+  clock.style.visibility = p === 1 ? "hidden" : "";
+  cal.style.transform = `translateY(${(-lockUI.dist * easeInOutCubic(clamp((p - 0.2) / 0.8, 0, 1))).toFixed(2)}px)`;
+}
+// macOS's lock UI also puts a big clock at the top center, over the message strip. Meanwhile the strip
+// shrinks toward its top-left corner until it ends LOCK_CLOCK_HALF left of the screen's center, then
+// grows back. Its bat is drawn with the same scale (noteFit), so it stays on the letters.
+const LOCK_CLOCK_HALF = 300; // half the width kept clear for macOS's lock-screen clock, in CSS px
+const LOCK_CLOCK_BOTTOM = 320; // how far down that clock reaches
+const noteFit = { s: 1, ox: 0, oy: 0 };
+function fitNoteToLockUI(p) {
+  const el = $("#note");
+  if (!p || el.hidden) {
+    if (noteFit.s !== 1) { el.style.transform = el.style.transformOrigin = ""; noteFit.s = 1; }
+    return;
+  }
+  const r = el.getBoundingClientRect(), w = r.width / noteFit.s; // its size without our scale
+  const room = innerWidth / 2 - LOCK_CLOCK_HALF - r.left;
+  const fit = r.top >= LOCK_CLOCK_BOTTOM ? 1 : clamp(room / w, 0.45, 1);
+  Object.assign(noteFit, { s: 1 - (1 - fit) * easeInOutCubic(clamp(p, 0, 1)), ox: r.left, oy: r.top });
+  el.style.transformOrigin = "0 0";
+  el.style.transform = noteFit.s === 1 ? "" : `scale(${noteFit.s.toFixed(4)})`;
+}
+const THUMB = qs.has("thumb"); // tiny live preview inside the settings window: cheaper rendering, no controls
+const ALL_THEMES = ["gotham"]; // this fork ships one theme
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+/* ---------- copy ---------- */
+const VERBS = ["Bubbling", "Pondering", "Percolating", "Noodling", "Swooping", "Crafting", "Synthesizing", "Moseying", "Echolocating", "Cogitating", "Tinkering", "Reticulating splines", "Brewing", "Untangling", "Shipping"];
+const IDLE_WORDS = ["chilling", "napping", "hanging around", "dreaming in tokens", "roosting", "watching the city", "standing by"];
+const STATE_LABEL = { working: "Working", thinking: "Thinking", waiting: "Needs you", done: "Done", idle: "Idle" };
+
+/* ---------- state ---------- */
+let config = {
+  theme: qs.get("theme") || store.get("cl.theme") || ALL_THEMES[0],
+  customText: qs.get("text") ?? store.get("cl.text") ?? "",
+  showDetails: store.get("cl.details") !== "0",
+  calTitles: true,
+  showUsage: false, // off until you turn it on
+  powerSaver: true,
+};
+if (!ALL_THEMES.includes(config.theme)) config.theme = ALL_THEMES[0];
+const themeFromUrl = qs.has("theme");
+let sessions = [];
+let calendar = { events: [], feeds: [] };
+let usage = null; // Claude plan usage: { connected, five_hour, seven_day, updated_at }, windows are { used, resets_at }
+let online = false;
+let lastLocalChange = 0;
+let demo = null, demoList = null;
+let current = { state: "idle", focus: null, live: [] };
+let prevState = null;
+let verbIdx = Math.floor(Math.random() * VERBS.length), idleIdx = 0;
+
+/* ---------- helpers ---------- */
+const rand = (a = 1, b) => (b === undefined ? Math.random() * a : a + Math.random() * (b - a));
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function hexA(hex, a) { const n = parseInt(hex.slice(1), 16); return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`; }
+// A colour token from the :root block, the one place the palette is defined. hexA(token(…), a) gives it an alpha.
+const token = (name, style = getComputedStyle(document.documentElement)) => style.getPropertyValue(name).trim();
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function fmtDur(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
+  if (h) return `${h}h ${String(m).padStart(2, "0")}m`;
+  if (m) return `${m}m ${String(r).padStart(2, "0")}s`;
+  return `${r}s`;
+}
+function ago(ms) { const m = Math.floor(ms / 60000); return m < 1 ? "just now" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`; }
+
+/* ---------- mascot sprites ---------- */
+// 16-wide pixel bat, front view. X = body and wings, E = eye. The rows from BEGIN to END are checked by check.js.
+// BAT-SPRITES-BEGIN
+const BAT = {
+  normal: ["....X......X....", "....XX....XX....", "....XXXXXXXX....", "X...XEXXXXEX...X", "XX..XXXXXXXX..XX", "XXXXXXXXXXXXXXXX", "XXXXXXXXXXXXXXXX", "X.XX.XXXXXX.XX.X"],
+  wave:   ["X...X......X...X", "XX..XX....XX..XX", "XXX.XXXXXXXX.XXX", "XXXXXEXXXXEXXXXX", ".XXXXXXXXXXXXXX.", "..XXXXXXXXXXXX..", "....XXXXXXXX....", ".....XXXXXX....."],
+  sleep:  ["....X......X....", "....XX....XX....", "....XXXXXXXX....", "....XXXXXXXX....", "...XXXXXXXXXX...", "...XXXXXXXXXX...", "...XXXXXXXXXX...", "....XXXXXXXX...."],
+};
+// Sneaking under macOS's password field: wings flat and wide, ears and eyes peeking up. o shifts the head for sneakL/sneakR.
+function batSneak(o) {
+  const ears = [..."................"], head = [..."................"];
+  for (const e of [4 + o, 11 + o]) ears[e] = "X";
+  for (let c = 4 + o; c <= 11 + o; c++) head[c] = c === 5 + o || c === 10 + o ? "E" : "X";
+  return [ears.join(""), head.join(""), "XXXXXXXXXXXXXXXX", ".XX.XXXXXXXX.XX."];
+}
+Object.assign(BAT, { sneak: batSneak(0), sneakL: batSneak(-1), sneakR: batSneak(1) });
+const BAT_FEET = [[".....X....X....."], ["......X..X......"]];
+const BAT_SNEAK_FEET = [["....X......X...."], [".....X....X....."]];
+// BAT-SPRITES-END
+// The mascot's sprites: 16-wide rows ("X" body, "E" eyes), feet per step, and the row the eyes blink on.
+const BAT_MASCOT = { poses: BAT, legs: BAT_FEET, sneakLegs: BAT_SNEAK_FEET, eyeRow: 3 };
+let mascot = BAT_MASCOT;
+const crabRows = (pose) => mascot.poses[pose].length + (pose.startsWith("sneak") ? mascot.sneakLegs : mascot.legs)[0].length;
+function drawCrab(g, cx, by, ps, pose, leg, body, eye, blink) {
+  const m = mascot, rows = m.poses[pose].concat((pose.startsWith("sneak") ? m.sneakLegs : m.legs)[leg]);
+  const x0 = Math.round(cx - 8 * ps), y0 = Math.round(by - rows.length * ps);
+  for (let r = 0; r < rows.length; r++) {
+    const row = rows[r];
+    for (let c = 0; c < 16; c++) {
+      let ch = row[c];
+      if (ch === ".") continue;
+      if (ch === "E" && blink && r === m.eyeRow) ch = "X";
+      g.fillStyle = ch === "E" ? eye : body;
+      g.fillRect(x0 + c * ps, y0 + r * ps, ps, ps);
+    }
+  }
+}
+
+/* ---------- shared bat behaviour ---------- */
+const walker = { x: -1, dir: 1, t: 0, duck: 0, step: 0, fly: 0, plan: null }; // fly/plan: flying over the sign-in (drawGroundCrab)
+// sneaking: crouched under macOS's password field (see drawGroundCrab).
+function stepWalker(dt, state, ps, w, targetX, sneaking = false) {
+  const k = walker; k.t += dt;
+  const half = 8 * ps;
+  if (k.x < 0) k.x = w * 0.3;
+  k.x = clamp(k.x, half, w - half);
+  let pose = "normal", lift = 0, moving = false, leg = null, look = 0;
+  if (state === "working") {
+    if (sneaking) {
+      // Tiptoe: a small careful step, then a pause to peek up at the field before the next one.
+      k.step += dt * 2;
+      const ph = k.step % 1, go = ph < 0.55 ? Math.sin((ph / 0.55) * Math.PI) : 0;
+      k.x += k.dir * ps * 24 * go * dt;
+      leg = Math.floor(k.step) % 2; look = go > 0.15 ? k.dir : 0;
+    } else {
+      k.x += k.dir * ps * 9 * dt; moving = true;
+    }
+    if (k.x > w - half - ps * 4) k.dir = -1;
+    if (k.x < half + ps * 4) k.dir = 1;
+  } else if (state === "waiting") {
+    const d = targetX - k.x;
+    if (Math.abs(d) > ps * 2) { k.x += Math.sign(d) * Math.min(Math.abs(d), ps * (sneaking ? 12 : 32) * dt); moving = true; look = Math.sign(d); }
+    pose = Math.floor(k.t * 4) % 2 ? "wave" : "normal";
+    lift = Math.abs(Math.sin(k.t * 7)) * ps * 3;
+  } else if (state === "done") {
+    pose = Math.floor(k.t * 3) % 2 ? "wave" : "normal";
+    lift = Math.abs(Math.sin(k.t * 6)) * ps * 2.5;
+    k.x += Math.sin(k.t * 3) * ps * 6 * dt;
+  } else {
+    pose = "sleep";
+  }
+  if (sneaking && state !== "idle") { pose = look < 0 ? "sneakL" : look > 0 ? "sneakR" : "sneak"; lift = 0; }
+  if (leg === null) leg = moving ? Math.floor(k.t * 8) % 2 : 0;
+  const blink = pose === "normal" && k.t % 4 < 0.12;
+  return { x: k.x, pose, leg, lift, blink };
+}
+const Z = { t: 0, list: [] };
+function zzz(g, dt, x, y, ps, color, font) {
+  Z.t += dt;
+  if (Z.t > 1.1) { Z.t = 0; Z.list.push({ x, y, age: 0 }); }
+  let expired = false;
+  for (const z of Z.list) if ((z.age += dt) >= 3) expired = true;
+  if (expired) Z.list = Z.list.filter((z) => z.age < 3); // rebuilt only when one has faded out
+  g.fillStyle = color; g.textAlign = "center";
+  for (const z of Z.list) {
+    g.globalAlpha = Math.max(0, 1 - z.age / 3) * 0.8;
+    g.font = `${Math.max(4, Math.round(ps * (2.5 + z.age * 1.4)))}px ${font}`;
+    g.fillText("z", z.x + Math.sin(z.age * 2) * ps * 2 + z.age * ps * 3, z.y - z.age * ps * 7);
+  }
+  g.globalAlpha = 1;
+}
+function bubble(g, x, y, ps, fill, ink, ch, font) {
+  const s = ps * 5;
+  g.fillStyle = fill; g.beginPath();
+  if (g.roundRect) g.roundRect(x - s / 2, y - s / 2, s, s, ps * 1.2); else g.rect(x - s / 2, y - s / 2, s, s);
+  g.fill();
+  g.beginPath(); g.moveTo(x - ps, y + s / 2 - 0.5); g.lineTo(x - ps * 2.5, y + s / 2 + ps * 2); g.lineTo(x + ps, y + s / 2 - 0.5); g.fill();
+  g.fillStyle = ink; g.font = `700 ${Math.max(5, Math.round(ps * 3.4))}px ${font}`;
+  g.textAlign = "center"; g.textBaseline = "middle"; g.fillText(ch, x, y + ps * 0.3); g.textBaseline = "alphabetic";
+}
+// macOS draws the password field and "Touch ID or Enter Password" over the bottom center of the
+// lock screen once you move the mouse: while that's showing (lockUI.to, set by the screensaver),
+// the bat sneaks under them (crouched, tiptoeing, peeking up) and waits for you beside them. The
+// rest of the time it keeps its usual moves, like running to the center and jumping with "!".
+const LOGIN_HALF = 94; // half their width, in CSS px (112 started the crawl early and ended it late on the real lock screen)
+// How high the jetpacking bat flies to clear the whole sign-in (your picture, name, field and hint), from the ground,
+// in CSS px. An estimate of macOS's layout, like LOGIN_HALF: tune it if the bat clips the picture on the real lock screen.
+const LOGIN_TOP = 200;
+function drawGroundCrab(g, dt, S, p, ps, w, ground, font, flier = false) {
+  const mid = w / 2, edge = LOGIN_HALF + 8 * ps, loginUp = lockUI.to === 1 && S.state !== "idle";
+  const target = S.state === "waiting" && loginUp ? S.crabTarget + edge + ps * 4 : S.crabTarget;
+  // Crouch just before the leading wing reaches the field; stand as the trailing wing clears it.
+  const off = walker.x < 0 ? Infinity : walker.x - mid;
+  // > 0 while still approaching: working walks its own way; the other states head for the target, or stand still.
+  const heading = Math.abs(target - walker.x) > ps ? Math.sign(target - walker.x) : 0;
+  const ahead = S.state === "working" ? -off * walker.dir : heading ? -off * heading : -Math.abs(off);
+  const under = loginUp && (ahead > 0 ? ahead < edge + ps * 0.5 : -ahead < edge) ? 1 : 0;
+  // A flier takes off as it nears the sign-in (a bit earlier than the crawl starts, to take off in time).
+  const near = loginUp && (ahead > 0 ? ahead < edge + ps * 14 : -ahead < edge + ps * 2);
+  if (!near) walker.plan = null;
+  else if (!walker.plan) walker.plan = flier ? "fly" : "crawl";
+  const flying = walker.plan === "fly";
+  walker.fly = (walker.fly || 0) + ((flying && near ? 1 : 0) - (walker.fly || 0)) * Math.min(1, dt * 2.2);
+  walker.duck += ((flying ? 0 : under) - walker.duck) * Math.min(1, dt * 14);
+  const x0 = walker.x, c = stepWalker(dt, S.state, ps, w, target, walker.duck > 0.85);
+  // A flier hovers in place until it's high enough to clear the sign-in, so it never climbs through it.
+  if (flying && walker.fly < 0.9 && x0 >= 0 && Math.abs(walker.x - mid) < edge + ps) { walker.x = x0; c.x = x0; }
+  if (walker.fly > 0.05 && S.state === "working") { walker.x += walker.dir * ps * 6 * walker.fly * dt; c.x = walker.x; } // a bit faster in the air
+  const dip = c.pose.startsWith("sneak") ? 0 : walker.duck; // the quick crouch into and out of the sneak
+  const hover = walker.fly * (LOGIN_TOP + Math.sin(walker.t * 3) * ps * 0.6);
+  const sy = 1 - 0.45 * dip, sx = 1 + 0.1 * dip, lift = c.lift * (1 - walker.duck) * (1 - walker.fly) + hover;
+  const by = ground - lift, top = by - ps * crabRows(c.pose) * sy;
+  g.fillStyle = p.shadow; g.beginPath();
+  g.ellipse(c.x, ground + ps * 0.4, ps * 7 * sx * Math.max(0.15, 1 - lift / (ps * 9)), Math.max(1, ps * 1.1), 0, 0, TAU); g.fill();
+  g.save(); g.translate(c.x, by); g.scale(sx, sy);
+  const light = { color: stateColor(p, S.state), fast: S.state === "waiting" }, now = performance.now() / 1000;
+  const pose = walker.fly > 0.3 ? (Math.floor(now / 0.12) % 2 ? "wave" : "normal") : c.pose; // a flier flaps in the air
+  drawCrab(g, 0, 0, ps, pose, c.leg, p.crab, p.eye, c.blink);
+  g.restore();
+  if (S.state === "waiting") bubble(g, c.x + ps * 9, top - ps * 4, ps, p.warn, p.eye, "!", font);
+  if (S.state === "idle") zzz(g, dt, c.x + ps * 6, top, ps, p.fg, font);
+}
+
+/* ---------- confetti ---------- */
+let confetti = [];
+function popConfetti(x, y, colors) {
+  for (let i = 0; i < 150; i++) {
+    const a = rand(TAU), v = rand(140, 560);
+    confetti.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 220, r: rand(TAU), vr: rand(-8, 8), c: colors[i % colors.length], life: rand(2.2, 3.8), w: rand(5, 10), h: rand(2.5, 5) });
+  }
+}
+function drawConfetti(g, dt) {
+  if (!confetti.length) return;
+  let expired = false;
+  for (const p of confetti) if ((p.life -= dt) <= 0) expired = true;
+  if (expired) confetti = confetti.filter((p) => p.life > 0);
+  for (const p of confetti) {
+    p.vy += 560 * dt; p.vx *= 0.99; p.x += p.vx * dt; p.y += p.vy * dt; p.r += p.vr * dt;
+    g.save(); g.globalAlpha = Math.min(1, p.life); g.translate(p.x, p.y); g.rotate(p.r);
+    g.fillStyle = p.c; g.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); g.restore();
+  }
+}
+
+/* ---------- hero motion ---------- */
+const hero = { rot: 0, spd: 0.1 };
+function heroParams(t, dt, state) {
+  const target = { working: 0.9, waiting: 0.25, done: 0.35, idle: 0.1 }[state];
+  hero.spd += (target - hero.spd) * Math.min(1, dt * 1.2);
+  hero.rot += hero.spd * dt;
+  const scale = state === "waiting" ? 1 + 0.07 * Math.sin(t * 7) : state === "working" ? 1 + 0.025 * Math.sin(t * 2) : 1;
+  const breathe = state === "working" ? 0.09 : state === "idle" ? 0.02 : 0.04;
+  return { rot: hero.rot, scale, breathe };
+}
+
+/* ---------- canvas + layout ---------- */
+const cv = $("#bg"), ctx = cv.getContext("2d");
+let W = 0, H = 0;
+const L = { hx: 0, hy: 0, hr: 60, ground: 0 };
+// Puts the middle of <main> (where the headline is) on the screen's center line. Layout only: the mouse never moves it.
+function centerHeadline() {
+  const m = $("main"), dy = innerHeight / 2 - (m.offsetTop + m.offsetHeight / 2);
+  m.style.transform = Math.abs(dy) < 0.5 ? "" : `translateY(${dy.toFixed(1)}px)`;
+}
+function measure() {
+  carousel.m = null; // the task row's widths may have changed too
+  centerHeadline();
+  const h = $("#heroSlot").getBoundingClientRect();
+  L.hx = h.left + h.width / 2; L.hy = h.top + h.height / 2; L.hr = h.width / 2;
+  L.ground = H - 14; // the bat walks in its own lane below everything (see #ui padding-bottom)
+  measureNote();
+  fitSessions();
+}
+// Session cards hang down from the top left; drop the ones that would run into the headline or task list.
+function fitSessions() {
+  const box = $("#sessions");
+  box.querySelector(".more")?.remove();
+  const cards = [...box.querySelectorAll(".sess")];
+  cards.forEach((c) => (c.style.display = ""));
+  const keepOut = ["#headline", "#tagline", "#nowline", "#plan"].map((s) => $(s).getBoundingClientRect()).filter((r) => r.width && r.height);
+  const hits = (el) => { const a = el.getBoundingClientRect(); return keepOut.some((b) => a.left < b.right + 16 && a.right > b.left - 16 && a.top < b.bottom + 12 && a.bottom > b.top - 12); };
+  let shown = cards.findIndex(hits);
+  if (shown < 0) return;
+  const more = document.createElement("div");
+  more.className = "more";
+  box.append(more);
+  for (; shown >= 0; shown--) {
+    cards.forEach((c, i) => (c.style.display = i < shown ? "" : "none"));
+    more.textContent = `+${cards.length - shown} more`;
+    if (!hits(more)) return;
+  }
+}
+// Power saver: on battery (and on in settings, the default) the scene draws at 30 fps on 1x canvases.
+// The server reports the battery. Without it (unreachable, or a file:// page), the browser's own battery status is
+// used where there is one; otherwise, after OFFLINE_SAVER_AFTER failed polls, assume battery: the cheaper guess.
+let onBattery = false;
+const OFFLINE_SAVER_AFTER = 3;
+let sysBattery = null; // navigator.getBattery(), where the browser has it
+function onBatteryNow() {
+  if (online || pollFailures === 0) return onBattery;
+  if (sysBattery) return !sysBattery.charging;
+  return pollFailures >= OFFLINE_SAVER_AFTER || onBattery;
+}
+const saving = () => config.powerSaver !== false && !THUMB && onBatteryNow();
+try {
+  navigator.getBattery?.().then((b) => {
+    sysBattery = b;
+    b.addEventListener("chargingchange", () => refreshCanvases());
+  }, () => {});
+} catch {}
+let canvasDpr = 0;
+function sizeCanvases() {
+  const dpr = THUMB || saving() ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+  if (dpr === canvasDpr && cv.width === Math.round(W * dpr) && cv.height === Math.round(H * dpr)) return false;
+  canvasDpr = dpr;
+  cv.width = fx.width = Math.round(W * dpr); cv.height = fx.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0); fxg.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return true;
+}
+// On battery the canvases drop to 1x; the scene's own layers are drawn at the canvas resolution, so redraw them too.
+function refreshCanvases() { if (sizeCanvases() && W) THEME_IMPL[config.theme].init(); }
+// Moving the window to a display with another pixel ratio: resize doesn't always fire, so watch the ratio itself.
+// A resolution query matches one ratio, so it's made again for the new one after each change.
+function watchPixelRatio() {
+  try {
+    matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`).addEventListener("change", () => { refreshCanvases(); watchPixelRatio(); }, { once: true });
+  } catch {}
+}
+function resize() {
+  W = innerWidth; H = innerHeight;
+  sizeCanvases();
+  measure();
+  THEME_IMPL[config.theme].init();
+}
+
+// Filled from the CSS tokens by readPalette() (the :root block is the only place the colours are written down).
+const PAL = { gotham: {} };
+const stateColor = (p, s) => (s === "waiting" ? p.warn : s === "done" ? p.ok : p.accent);
+
+const THEME_IMPL = {
+  // A night city: a static sky + skyline layer (#sky, drawn once per size), then live stars, a shooting star,
+  // a searchlight swaying up to an empty signal behind the headline, a few flickering windows, and the bat.
+  gotham: {
+    // Scene shades, read from the CSS tokens by readPalette() (PAL.gotham holds the state colours).
+    TONE: {},
+    init() {
+      const T = this.TONE, dpr = canvasDpr || 1, gy = L.ground;
+      this.ready = false;
+      if (W < 1 || H < 1) return; // no size yet (or a hidden view): nothing to build, and the skyline loop needs width
+      this.sky = $("#sky");
+      this.sky.width = Math.round(W * dpr); this.sky.height = Math.round(H * dpr);
+      const g = this.sky.getContext("2d");
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      let seed = 1337; // seeded, so the skyline is the same city every time
+      const rnd = (a = 1, b) => { seed = (seed * 16807) % 2147483647; const r = seed / 2147483647; return b === undefined ? r * a : a + r * (b - a); };
+      const bg = g.createLinearGradient(0, 0, 0, gy);
+      bg.addColorStop(0, T.skyTop); bg.addColorStop(1, T.skyLow);
+      g.fillStyle = bg; g.fillRect(0, 0, W, gy);
+      g.fillStyle = T.ground; g.fillRect(0, gy, W, H - gy);
+      const haze = g.createLinearGradient(0, gy - H * 0.3, 0, gy);
+      haze.addColorStop(0, hexA(T.haze, 0)); haze.addColorStop(1, hexA(T.haze, 0.05));
+      g.fillStyle = haze; g.fillRect(0, gy - H * 0.3, W, H * 0.3);
+      // Two rows of buildings: a low far one, then the near one with windows.
+      const row = (color, hMin, hMax, windows) => {
+        const tops = [];
+        for (let x = -rnd(20); x < W; ) {
+          const bw = Math.round(rnd(0.022, 0.06) * W), bh = Math.round(rnd(hMin, hMax) * H), top = gy - bh;
+          g.fillStyle = color; g.fillRect(x, top, bw + 1, bh);
+          const kind = rnd();
+          if (kind < 0.25) g.fillRect(x + bw * 0.25, top - bh * 0.08, bw * 0.5, bh * 0.08); // a stepped top
+          else if (kind < 0.4) g.fillRect(x + bw * 0.5 - 1, top - bh * 0.22, 2, bh * 0.22); // an antenna
+          else if (kind < 0.5) { g.beginPath(); g.moveTo(x, top); g.lineTo(x + bw / 2, top - bw * 0.35); g.lineTo(x + bw + 1, top); g.fill(); } // a spire
+          tops.push({ x, w: bw, top });
+          if (windows) {
+            for (let wy = top + 8; wy < gy - 10; wy += 9)
+              for (let wx = x + 4; wx < x + bw - 5; wx += 7) {
+                if (rnd() > 0.035) continue;
+                g.globalAlpha = rnd(0.35, 0.6); g.fillStyle = T.window; g.fillRect(wx, wy, 3, 4); g.globalAlpha = 1;
+              }
+            for (let k = 0; k < 2 && this.flicker.length < 14; k++) // a few windows that switch on and off
+              this.flicker.push({ x: Math.round(x + 4 + 7 * Math.floor(rnd(Math.max(1, (bw - 9) / 7)))), y: Math.round(top + 8 + 9 * Math.floor(rnd(Math.max(1, (bh - 18) / 9)))), f: rnd(0.05, 0.2), p: rnd(TAU), th: rnd(0.2, 0.7) });
+          }
+          x += Math.max(1, bw) + Math.round(rnd(0, 0.006) * W);
+        }
+        return tops;
+      };
+      this.flicker = [];
+      row(T.cityFar, 0.05, 0.13, false);
+      const near = row(T.city, 0.06, 0.22, true);
+      // The searchlight stands on the roof nearest 78% across.
+      const roof = near.length === 0 ? { x: W * 0.78, w: 0, top: gy } : near.reduce((a, b) => (Math.abs(b.x + b.w / 2 - W * 0.78) < Math.abs(a.x + a.w / 2 - W * 0.78) ? b : a));
+      this.base = { x: roof.x + roof.w / 2, y: roof.top };
+      g.fillStyle = T.city; g.fillRect(this.base.x - 4, this.base.y - 5, 8, 5); // its housing
+      // The horizon's faint highlight (constant, so it lives on this layer rather than being rebuilt every frame).
+      const hl = g.createLinearGradient(0, 0, W, 0);
+      hl.addColorStop(0, hexA(T.horizon, 0)); hl.addColorStop(0.5, hexA(T.horizon, 0.14)); hl.addColorStop(1, hexA(T.horizon, 0));
+      g.fillStyle = hl; g.fillRect(0, gy, W, 1);
+      this.stars = Array.from({ length: Math.round(clamp((W * H) / 9000, 60, 500)) }, () => ({ x: rand(W), y: rand(gy * 0.7), r: rand(0.5, 1.3), a: rand(0.15, 0.7), s: rand(0.4, 1.2), p: rand(TAU) }));
+      this.shoot = null; this.next = rand(8, 20);
+      this.glows = new Map(); this.beamFor = null;
+      this.ready = true;
+    },
+    // The beam, pre-rendered pointing up from its base at the bottom center: narrow at the lamp, wide at the sky.
+    beam(len, width) {
+      const key = `${Math.round(len)},${Math.round(width)}`;
+      if (this.beamFor === key) return this.beamImg;
+      const c = document.createElement("canvas"), dpr = canvasDpr || 1;
+      c.width = Math.ceil(width * dpr); c.height = Math.ceil(len * dpr);
+      const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const gr = g.createLinearGradient(0, len, 0, 0);
+      gr.addColorStop(0, hexA(this.TONE.beam, 0.09)); gr.addColorStop(1, hexA(this.TONE.beam, 0.025));
+      g.fillStyle = gr; g.beginPath();
+      g.moveTo(width / 2 - 3, len); g.lineTo(0, 0); g.lineTo(width, 0); g.lineTo(width / 2 + 3, len); g.fill();
+      this.beamFor = key; this.beamImg = c;
+      return c;
+    },
+    // The soft glow of the signal, one image per colour and size: a big radial gradient every frame is slow in WebKit.
+    glow(col, R) {
+      const key = `${col},${Math.round(R)}`;
+      let c = this.glows.get(key);
+      if (c) return c;
+      const dpr = canvasDpr || 1; c = document.createElement("canvas");
+      c.width = c.height = Math.ceil(R * 2 * dpr);
+      const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const gr = g.createRadialGradient(R, R, 0, R, R, R);
+      gr.addColorStop(0, hexA(col, 0.22)); gr.addColorStop(0.35, hexA(col, 0.12)); gr.addColorStop(0.5, hexA(col, 0.05)); gr.addColorStop(1, hexA(col, 0));
+      g.fillStyle = gr; g.fillRect(0, 0, R * 2, R * 2);
+      if (this.glows.size > 8) this.glows.clear();
+      this.glows.set(key, c);
+      return c;
+    },
+    draw(g, t, dt, S) {
+      const p = PAL.gotham, T = this.TONE;
+      g.clearRect(0, 0, W, H); // transparent: the #sky layer shows through
+      if (!this.ready) return;
+      g.imageSmoothingEnabled = true;
+      g.fillStyle = T.star;
+      for (const s of this.stars) {
+        g.globalAlpha = s.a * (0.55 + 0.45 * Math.sin(t * 0.6 * s.s + s.p));
+        g.fillRect(s.x, s.y, s.r, s.r);
+      }
+      g.globalAlpha = 1;
+      this.next -= dt;
+      if (this.next < 0 && !this.shoot) { this.shoot = { x: rand(W * 0.3, W), y: rand(L.ground * 0.4), life: 0 }; this.next = rand(8, 20); }
+      if (this.shoot) {
+        const s = this.shoot; s.life += dt;
+        const x = s.x - s.life * 700, y = s.y + s.life * 300, a = 0.5 * Math.max(0, 1 - s.life / 0.9);
+        const gr = g.createLinearGradient(x, y, x + 120, y - 51);
+        gr.addColorStop(0, hexA(T.star, a)); gr.addColorStop(1, hexA(T.star, 0));
+        g.strokeStyle = gr; g.lineWidth = 1.5; g.beginPath(); g.moveTo(x, y); g.lineTo(x + 120, y - 51); g.stroke();
+        if (s.life > 0.9) this.shoot = null;
+      }
+      // The searchlight, swaying a few degrees around the signal.
+      const b = this.base, dx = L.hx - b.x, dy = L.hy - b.y, len = Math.hypot(dx, dy) * 1.12;
+      const ang = Math.atan2(dy, dx) + Math.PI / 2 + Math.sin((t * TAU) / 25) * 0.07;
+      const img = this.beam(len, L.hr * 2.6);
+      g.save(); g.translate(b.x, b.y); g.rotate(ang); g.drawImage(img, -L.hr * 1.3, -len, L.hr * 2.6, len); g.restore();
+      // The signal: an empty, softly lit disc in the state's colour, with a thin breathing ring.
+      const col = stateColor(p, S.state), hp = S.hero, R = L.hr * 2.2 * hp.scale;
+      g.drawImage(this.glow(col, L.hr * 2.2), L.hx - R, L.hy - R, R * 2, R * 2);
+      g.strokeStyle = hexA(col, 0.3 + 2 * hp.breathe * Math.sin(t * 3)); g.lineWidth = 1.5;
+      g.beginPath(); g.arc(L.hx, L.hy, L.hr * 1.15 * hp.scale, 0, TAU); g.stroke();
+      // Windows that switch on and off.
+      g.fillStyle = T.window;
+      for (const w of this.flicker) if (Math.sin(t * w.f + w.p) > w.th) { g.globalAlpha = 0.5; g.fillRect(w.x, w.y, 3, 4); }
+      g.globalAlpha = 1;
+      drawGroundCrab(g, dt, S, p, Math.round(clamp(W / 190, 4, 9)), W, L.ground, "Space Grotesk, sans-serif", true);
+      drawConfetti(g, dt);
+    },
+  },
+};
+
+const CONFETTI = { gotham: [] }; // filled by readPalette()
+
+// Reads the scene's colours from the CSS tokens, once per theme (getComputedStyle isn't free). Returns whether they
+// changed: the once-rendered layers (#sky, the beam and glow images) are then rebuilt by the caller's init().
+let paletteKey = "";
+function readPalette() {
+  const st = getComputedStyle(document.documentElement), t = (n) => token(n, st);
+  const P = { accent: t("--accent-base"), warn: t("--warn"), ok: t("--ok"), crab: t("--bat"), eye: t("--bat-eye"), fg: t("--fg"), shadow: t("--bat-shadow") };
+  const T = { skyTop: t("--sky-top"), skyLow: t("--sky-low"), ground: t("--ground"), city: t("--city"), cityFar: t("--city-far"),
+    window: t("--window"), beam: t("--beam"), star: t("--star"), haze: P.accent, horizon: P.fg };
+  const key = JSON.stringify([P, T]);
+  if (key === paletteKey) return false;
+  paletteKey = key;
+  PAL.gotham = P; THEME_IMPL.gotham.TONE = T;
+  CONFETTI.gotham = [P.fg, P.accent, T.window, P.ok];
+  return true;
+}
+
+// The Agent Foudre mark (brand/agent-foudre-mark.png, made from batman-logo.jpg), 96px for the 22px header mark.
+const MARK = '<img class="mark" alt="" src="data:image/png;base64,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">';
+const BRAND_NAME = () => `${MARK}<span>Agent Foudre</span>`;
+
+/* ---------- status derivation ---------- */
+function makeDemo(kind) {
+  const now = Date.now();
+  const list = [
+    { id: "d1", project: "web-app", state: "working", action: "Update the settings page styles", task_started: now - 754e3, updated_at: now,
+      plan: [["Read the settings page and theme tokens", "completed"], ["Add a dark color palette", "completed"], ["Follow the system appearance", "completed"], ["Wire up the appearance switch", "completed"], ["Update the settings page styles", "in_progress"], ["Run the tests and fix failures", "pending"]].map(([text, status]) => ({ text, status })) },
+    { id: "d2", project: "api-server", state: "thinking", action: "Thinking", task_started: now - 128e3, updated_at: now },
+    { id: "d3", project: "docs-site", state: "done", action: "Finished", task_started: now - 1500e3, done_at: now - 180e3, updated_at: now - 180e3 },
+  ];
+  if (kind === "waiting") Object.assign(list[0], { state: "waiting", action: "Claude needs your permission to use Bash" });
+  if (kind === "done") {
+    list.forEach((s, i) => Object.assign(s, { state: "done", action: "Finished", done_at: now - i * 240e3 - 5e3 }));
+    list[0].plan.forEach((p) => (p.status = "completed"));
+  }
+  return kind === "idle" ? [] : list;
+}
+const RANK = { waiting: 0, working: 1, thinking: 1, done: 2, idle: 3 };
+const DONE_MS = 10 * 60e3;
+// A working session that hasn't reported anything for a while has probably stalled (an interrupted turn sends no
+// Stop): it drops below the ones really working and the recently finished ones, and isn't picked for the headline.
+// "Thinking" reports often, so 5 min; inside one tool (a long build, say) nothing arrives until it ends, so 20 min.
+const isWorking = (s) => s.state === "working" || s.state === "thinking";
+const isActive = (s, now) => now - (s.updated_at || 0) <= (s.state === "thinking" ? 5 : 20) * 60e3;
+const activeRank = (s, now) => (isWorking(s) && !isActive(s, now) ? 2.5 : RANK[s.state]);
+// Several sessions in the same state: stay on one and rotate every 12s, instead of jumping
+// to whichever session ran a tool most recently (which would flicker on every tool call).
+const ROTATE_MS = 12000;
+let focusId = null, focusSince = 0;
+function pickFocus(cands, now) {
+  cands.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  let i = cands.findIndex((s) => s.id === focusId);
+  if (i < 0) { i = 0; focusSince = now; }
+  else if (cands.length > 1 && now - focusSince > ROTATE_MS) { i = (i + 1) % cands.length; focusSince = now; }
+  focusId = cands[i].id;
+  return { focus: cands[i], focusIndex: i, focusCount: cands.length };
+}
+function derive() {
+  const now = Date.now();
+  const list = demo ? demoList : sessions;
+  if (demo) for (const s of list) if (s.state !== "done") s.updated_at = now;
+  // Idle sessions are never shown; finished ones only for DONE_MS after they finish.
+  const live = list.filter((s) => {
+    if (s.state === "idle") return false;
+    if (s.state === "done") return now - (s.done_at || s.updated_at || 0) < DONE_MS;
+    return now - (s.updated_at || 0) < 45 * 60e3;
+  }).sort((a, b) => activeRank(a, now) - activeRank(b, now) || b.updated_at - a.updated_at);
+  const waiting = live.filter((s) => s.state === "waiting");
+  const allWorking = live.filter(isWorking);
+  const active = allWorking.filter((s) => isActive(s, now));
+  const working = active.length ? active : allWorking;
+  const done = live.find((s) => s.state === "done");
+  if (waiting.length) return { state: "waiting", ...pickFocus(waiting, now), live };
+  // Prefer sessions with a task list so the list doesn't vanish whenever the rotation lands
+  // on a session that hasn't made a plan; plan-less sessions still show as cards.
+  const planned = working.filter((s) => Array.isArray(s.plan) && s.plan.length);
+  if (working.length) return { state: "working", ...pickFocus(planned.length ? planned : working, now), live };
+  if (done) return { state: "done", focus: done, focusIndex: 0, focusCount: 1, live };
+  return { state: "idle", focus: null, live };
+}
+
+/* ---------- calendar ---------- */
+function demoCalendar() {
+  const now = Date.now(), min = 60e3, at = (m) => Math.round((now + m * min) / (5 * min)) * 5 * min;
+  return { feeds: [{ id: "demo", ok: true }], events: [
+    { title: "Weekly product sync", start: at(-20), end: at(25) },
+    { title: "Design review: new widget", start: at(70), end: at(100) },
+  ] };
+}
+const hhmm = (t) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+function inMin(ms) {
+  const m = Math.max(1, Math.round(ms / 60e3));
+  return m < 60 ? `in ${m} min` : `in ${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ""}`;
+}
+// The meeting you're in (and when you're actually free, across back-to-back meetings) plus the next one.
+function meetings(now = Date.now()) {
+  const cal = demo ? demoCalendar() : calendar;
+  const evs = (cal.events || []).filter((e) => !e.allDay && e.end > now).sort((a, b) => a.start - b.start);
+  const cur = evs.filter((e) => e.start <= now);
+  let freeAt = 0;
+  if (cur.length) {
+    freeAt = Math.max(...cur.map((e) => e.end));
+    for (const e of evs) if (e.start > now && e.start <= freeAt + 60e3) freeAt = Math.max(freeAt, e.end);
+  }
+  const midnight = new Date(now); midnight.setHours(24, 0, 0, 0);
+  return {
+    connected: (cal.feeds || []).length > 0,
+    failing: (cal.feeds || []).length > 0 && cal.feeds.every((f) => f.ok === false),
+    now: cur.sort((a, b) => b.start - a.start)[0] || null, // the most recently started one
+    freeAt,
+    next: evs.find((e) => e.start > now) || null,
+    midnight: midnight.getTime(),
+  };
+}
+function calCard() {
+  const now = Date.now(), M = meetings(now), titles = config.calTitles !== false;
+  if (!M.connected) return { cls: "", html: "" };
+  const ttl = (e) => (titles ? esc(e.title) : "");
+  const nextLine = (e) => {
+    const day = e.start >= M.midnight ? `Tomorrow ${hhmm(e.start)}` : `Next ${hhmm(e.start)}`;
+    return `<div class="nx"><span>${day}</span>${titles ? `<b dir="auto">${esc(e.title)}</b>` : ""}</div>`;
+  };
+  if (M.now) {
+    const e = M.now, p = clamp((now - e.start) / Math.max(1, e.end - e.start), 0, 1);
+    const left = Math.max(1, Math.round((e.end - now) / 60e3));
+    const after = M.next && M.next.start < M.midnight + 12 * 3600e3 ? nextLine(M.next) : "";
+    return { cls: "busy", html: `<div class="k"><span class="cdot"></span>In a meeting<span class="when">until ${hhmm(M.freeAt)}</span></div>
+      ${titles ? `<div class="ttl" dir="auto">${ttl(e)}</div>` : ""}<div class="sub">${hhmm(e.start)} – ${hhmm(e.end)} · ${left} min left</div>
+      <div class="bar"><i style="width:${(p * 100).toFixed(1)}%"></i></div>${after}` };
+  }
+  if (M.next && M.next.start < M.midnight) {
+    const e = M.next, soon = e.start - now <= 10 * 60e3;
+    const when = e.start - now < 3 * 3600e3 ? inMin(e.start - now) : `at ${hhmm(e.start)}`;
+    return { cls: soon ? "soon" : "", html: `<div class="k"><span class="cdot"></span>${soon ? "Starting soon" : "Next meeting"}<span class="when">${when}</span></div>
+      ${titles ? `<div class="ttl" dir="auto">${ttl(e)}</div>` : ""}<div class="sub">${hhmm(e.start)} – ${hhmm(e.end)}</div>` };
+  }
+  if (M.failing) return { cls: "quiet", html: `<div class="k"><span class="cdot"></span>Calendar isn't syncing</div>` };
+  const tmrw = M.next && M.next.start < M.midnight + DAY_MS ? `<div class="sub">Tomorrow ${hhmm(M.next.start)}${titles ? ` · ${esc(M.next.title)}` : ""}</div>` : "";
+  return { cls: "quiet", html: `<div class="k"><span class="cdot"></span>No more meetings today</div>${tmrw}` };
+}
+const DAY_MS = 864e5;
+
+/* ---------- plan usage ---------- */
+function demoUsage() {
+  const now = Date.now();
+  return { connected: true, updated_at: now, five_hour: { used: 62, resets_at: now + 130 * 60e3 }, seven_day: { used: 41, resets_at: now + 3 * DAY_MS + 5 * 3600e3 } };
+}
+// A time within the next day, otherwise just the weekday (enough for the weekly limit, and it fits the card).
+function resetsText(at, now) {
+  return at - now < DAY_MS ? hhmm(at) : new Date(at).toLocaleDateString([], { weekday: "long" });
+}
+function usageCard() {
+  const u = demo ? demoUsage() : usage, now = Date.now();
+  // Demos show sample usage (the website), except the settings thumbnails, which follow your Show plan usage switch.
+  if ((config.showUsage !== true && (!demo || THUMB)) || !u || (!u.five_hour && !u.seven_day)) return "";
+  const row = (label, w) => {
+    if (!w) return "";
+    const fresh = w.resets_at <= now; // the window reset since Claude Code last reported it
+    const pct = fresh ? 0 : Math.round(w.used);
+    const right = fresh ? "<b>0%</b> · new window" : pct >= 100 ? `<b>Limit reached</b> · ${resetsText(w.resets_at, now)}` : `<b>${pct}%</b> · resets ${resetsText(w.resets_at, now)}`;
+    return `<div class="row${pct >= 80 ? " high" : ""}"><div class="l"><span>${label}</span><span>${right}</span></div><div class="bar"><i style="width:${clamp(pct, 0, 100)}%"></i></div></div>`;
+  };
+  const stale = now - (u.updated_at || 0) > 30 * 60e3 ? `<span class="when">as of ${ago(now - u.updated_at)}</span>` : "";
+  return `<div class="k">Plan usage${stale}</div>${row("5-hour", u.five_hour)}${row("Weekly", u.seven_day)}`;
+}
+
+/* ---------- DOM rendering ---------- */
+// Which agent the headline names: Claude Code today; a hook can tag sessions with another agent (e.g. "codex").
+// <bdi>: an agent name in a right-to-left script mustn't reorder the English around it.
+const agentName = (s) => `<bdi>${esc((s && s.agent) || "claude")}</bdi>`;
+function headlineHTML(state, focus) {
+  const who = agentName(focus);
+  if (state === "working") return `${who} is <em>working</em>`;
+  if (state === "waiting") return `${who} <em>needs you</em>`;
+  if (state === "done") return `${who} is <em>done</em>`;
+  return `${who} is <em>${IDLE_WORDS[idleIdx % IDLE_WORDS.length]}</em>`;
+}
+// Compared with what was last set, not innerHTML: the browser serializes ' and " differently from esc(),
+// so a name with a quote would never match and would fade in again every second.
+let lastHeadline = null;
+function setHeadline(html) {
+  if (html === lastHeadline) return;
+  lastHeadline = html;
+  const h = $("#headline");
+  h.innerHTML = html;
+  tween(h, 700, 14, 6);
+  requestAnimationFrame(measure);
+}
+let lastTag = "";
+function setTagline(text) {
+  if (text === lastTag) return;
+  lastTag = text;
+  $("#tagline").innerHTML = `<span class="fade" dir="auto">${esc(text)}</span>`;
+  tween($("#tagline .fade"), 500, 6, 0);
+}
+// Enter fades run on the rAF loop: some screensaver/embedded web views freeze the CSS animation timeline.
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+// A name too long for its space slides to show the rest every 10 seconds: slide to the end, hold,
+// pop back to the start and wait for the next one. It runs on the page clock, so a session card that
+// gets rebuilt carries on where it was.
+function slideOffset(t, over) {
+  if (over <= 0 || REDUCED) return 0;
+  const move = clamp(over / 30, 1, 7), x = t % 10;
+  if (x >= move + 1.5) return 0; // popped back
+  const q = Math.min(1, x / move);
+  return -over * q * q * (3 - 2 * q);
+}
+const tweens = new Map();
+function tween(el, ms, dy, blur) { if (!REDUCED) tweens.set(el, { start: performance.now(), ms, dy, blur }); }
+function stepTweens(now) {
+  for (const [el, tw] of tweens) {
+    const p = clamp((now - tw.start) / tw.ms, 0, 1), e = 1 - Math.pow(1 - p, 3);
+    if (p >= 1 || !el.isConnected) { el.style.opacity = el.style.transform = el.style.filter = ""; tweens.delete(el); continue; }
+    el.style.opacity = e;
+    el.style.transform = `translateY(${(1 - e) * tw.dy}px)`;
+    el.style.filter = tw.blur ? `blur(${(1 - e) * tw.blur}px)` : "";
+  }
+}
+function taglineText(D) {
+  if (D.state === "working") return `${VERBS[verbIdx % VERBS.length]}…`;
+  if (D.state === "waiting") return "Blocked on you. Come say hi.";
+  if (D.state === "done") return "All wrapped up. Ready for the next one.";
+  return online || demo ? "No active sessions. The bat is resting." : "Offline mode: start the server for live status.";
+}
+function nowlineHTML(D) {
+  const f = D.focus, now = Date.now();
+  if (!f) return "";
+  const det = config.showDetails;
+  const parts = [];
+  if (D.state === "working") {
+    parts.push(`<span class="txt" dir="auto">${esc(det ? f.action || "Thinking" : "Working")}</span>`);
+    if (det) parts.push(`<span class="sep">·</span><span class="txt" dir="auto">${esc(f.project)}</span>`);
+    if (f.task_started) parts.push(`<span class="sep">·</span><span class="t">${fmtDur(now - f.task_started)}</span>`);
+  } else if (D.state === "waiting") {
+    parts.push(`<span class="txt" dir="auto">${esc(det ? f.action || "Waiting for you" : "Waiting for you")}</span>`);
+    if (det) parts.push(`<span class="sep">·</span><span class="txt" dir="auto">${esc(f.project)}</span>`);
+  } else if (D.state === "done") {
+    const took = f.task_started && f.done_at ? `Finished in ${fmtDur(f.done_at - f.task_started)}` : "Finished";
+    parts.push(`<span class="txt">${took}</span>`);
+    if (det) parts.push(`<span class="sep">·</span><span class="txt" dir="auto">${esc(f.project)}</span>`);
+    parts.push(`<span class="sep">·</span><span class="t">${ago(now - f.done_at)}</span>`);
+  }
+  return `<span class="dot"></span>${parts.join("")}`;
+}
+function sessionsHTML(D) {
+  if (!config.showDetails || D.live.length < 2) return "";
+  const now = Date.now();
+  return D.live.slice(0, 4).map((s) => {
+    const st = s.state === "thinking" ? "working" : s.state;
+    let time = s.state === "done" ? `done ${ago(now - (s.done_at || s.updated_at))}` : s.task_started && s.state !== "idle" ? fmtDur(now - s.task_started) : "";
+    if (Array.isArray(s.plan) && s.plan.length) time += `${time ? " · " : ""}step ${Math.min(s.plan.length, s.plan.filter((p) => p.status === "completed").length + 1)}/${s.plan.length}`;
+    const focus = D.focus && s.id === D.focus.id ? " focus" : "";
+    return `<div class="sess${focus}"><div class="top"><span class="p"><span class="mq" dir="auto">${esc(s.project)}</span></span><span class="chip ${st}">${STATE_LABEL[s.state] || s.state}</span></div>
+      <div class="a" dir="auto">${esc(s.action || "")}</div>${time ? `<div class="tm">${time}</div>` : ""}</div>`;
+  }).join("");
+}
+const PLAN_ICON = {
+  completed: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="8" fill="currentColor"/><path d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke="var(--bg)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  in_progress: '<svg class="ic spin" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-opacity=".25" stroke-width="1.8"/><path d="M8 1.6a6.4 6.4 0 0 1 6.4 6.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  pending: '<svg class="ic" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>',
+};
+// The agent's task list for the session in focus, as a row of little cards: the current task (or the next one
+// to start) lit, the ones after it readable, finished ones dimmed. stepCarousel slides the row along.
+function planHTML(D) {
+  const f = D.focus;
+  if (!config.showDetails || !f || !Array.isArray(f.plan) || !f.plan.length) return "";
+  const plan = f.plan, done = plan.filter((p) => p.status === "completed").length;
+  let i = plan.findIndex((p) => p.status === "in_progress");
+  if (i < 0) { const open = plan.findIndex((p) => p.status !== "completed"); i = open < 0 ? plan.length - 1 : open; }
+  const cards = plan.map((p, j) => {
+    const st = PLAN_ICON[p.status] ? p.status : "pending";
+    return `<div class="tc ${st}${j === i ? " now" : ""}">${PLAN_ICON[st]}<span class="tx" dir="auto">${esc(p.text)}</span></div>`;
+  }).join("");
+  const meta = [`${done}/${plan.length}`, esc(f.project)];
+  if (f.task_started && D.state !== "done") meta.push('<span class="tm"></span>'); // ticks in render(), without rebuilding
+  if (D.focusCount > 1) meta.push(`session ${D.focusIndex + 1} of ${D.focusCount}`);
+  return `<div class="rail"><div class="track" data-session="${esc(f.id)}">${cards}</div></div><div class="meta">${meta.join(" · ")}</div>`;
+}
+// Slides the task cards so the current one sits a third of the way in, leaving room to read what's next (or
+// centers the whole row when it fits). Eased on the frame loop (screensaver web views
+// can freeze CSS animations); a new session's list snaps into place instead of sliding across.
+// Layout is read only when the row is rebuilt or the page is measured again (resize, fonts, every 2 s): carousel.m.
+const carousel = { x: null, session: null, m: null };
+function stepCarousel(dt) {
+  let m = carousel.m;
+  if (m === null || (m && !m.track.isConnected)) { // false: measured, and there's no task row
+    const track = $("#plan .track"), cur = track && track.querySelector(".tc.now");
+    m = carousel.m = cur ? { track, railW: track.parentElement.clientWidth, rowW: track.scrollWidth, curLeft: cur.offsetLeft } : false;
+  }
+  if (!m) { carousel.x = null; return; }
+  const { track, railW, rowW, curLeft } = m;
+  const target = rowW <= railW * 0.88 ? (railW - rowW) / 2 : clamp(railW * 0.34 - curLeft, railW * 0.94 - rowW, railW * 0.06);
+  if (carousel.x === null || carousel.session !== track.dataset.session) { carousel.x = target; carousel.session = track.dataset.session; }
+  else carousel.x += (target - carousel.x) * Math.min(1, dt * (REDUCED ? 60 : 4));
+  const tf = `translateX(${carousel.x.toFixed(1)}px)`;
+  if (tf !== carousel.tf || track !== carousel.track) { track.style.transform = tf; carousel.tf = tf; carousel.track = track; } // settled: nothing to restyle
+}
+let spinners = [];
+let marquees = null; // session-card names too long for their card: [element, overflow px]; null = measure again
+addEventListener("resize", () => (marquees = null));
+function stepMarquees(t) {
+  if (REDUCED) return;
+  if (!marquees) marquees = [...document.querySelectorAll("#sessions .mq")]
+    .map((el) => [el, el.offsetWidth - el.parentElement.clientWidth]).filter(([, over]) => over > 0);
+  for (const m of marquees) { // written only when it moves: most of the 10 s it stands still
+    const tf = `translateX(${slideOffset(t, m[1]).toFixed(1)}px)`;
+    if (tf !== m[2]) { m[0].style.transform = tf; m[2] = tf; }
+  }
+}
+let lastPlanHTML = null;
+let lastSessHTML = null;
+let lastCalHTML = null;
+let lastUsageHTML = null;
+function render() {
+  const D = derive();
+  current = D;
+  if (document.body.dataset.state !== D.state) document.body.dataset.state = D.state;
+  if (D.state !== prevState) {
+    if (D.state === "done" && (prevState === "working" || prevState === "waiting")) {
+      popConfetti(L.hx, L.hy, CONFETTI[config.theme]); hero.spd = 6;
+    }
+    prevState = D.state;
+  }
+  setHeadline(headlineHTML(D.state, D.focus));
+  setTagline(taglineText(D));
+  const custom = config.customText || "";
+  if (custom !== note.text) buildNote(custom);
+  const cc = calCard();
+  if (cc.html !== lastCalHTML) { const el = $("#cal"); el.className = cc.cls; el.innerHTML = cc.html; lastCalHTML = cc.html; }
+  const uh = usageCard();
+  if (uh !== lastUsageHTML) { $("#usage").innerHTML = uh; lastUsageHTML = uh; }
+  const ph = planHTML(D);
+  setHTML($("#nowline"), ph ? "" : nowlineHTML(D)); // the bar already shows the step, project and time
+  if (ph !== lastPlanHTML) {
+    $("#plan").innerHTML = ph; lastPlanHTML = ph;
+    document.body.classList.toggle("has-plan", !!ph);
+    spinners = [...document.querySelectorAll("#plan .spin")];
+    carousel.m = null; // a new row: measure it
+    stepCarousel(0); // the rebuilt row starts where the old one was, then slides
+    requestAnimationFrame(measure);
+  }
+  const tm = $("#plan .tm");
+  if (tm && D.focus && D.focus.task_started) setText(tm, fmtDur(Date.now() - D.focus.task_started));
+
+  const sh = sessionsHTML(D);
+  // Refit in the same step (not a frame later), or every redraw would flash the cards that don't fit.
+  if (sh !== lastSessHTML) { $("#sessions").innerHTML = sh; lastSessHTML = sh; fitSessions(); marquees = null; requestAnimationFrame(measure); }
+  const d = new Date();
+  setText($("#time"), d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+  setText($("#date"), d.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" }));
+  setText($("#conn"), demo ? `previewing “${demo}”` : online ? "live: connected to Claude Code" : "offline: run the server for live status");
+}
+// render() runs every second: writing the same text again would still restyle and lay out the page.
+const setText = (el, text) => { if (el.textContent !== text) el.textContent = text; };
+const htmlOf = new WeakMap();
+const setHTML = (el, html) => { if (htmlOf.get(el) !== html) { el.innerHTML = html; htmlOf.set(el, html); } };
+
+/* ---------- theme switching + config ---------- */
+function setTheme(name, persist = true) {
+  if (!ALL_THEMES.includes(name)) return;
+  config.theme = name;
+  document.documentElement.dataset.theme = name;
+  $("#brand").innerHTML = BRAND_NAME();
+  mascot = BAT_MASCOT;
+  walker.x = -1; walker.fly = 0; walker.plan = null; Z.list = []; confetti = [];
+  readPalette(); // the theme's tokens apply now that data-theme is set
+  if (W) { measure(); THEME_IMPL[name].init(); }
+  if (persist) saveConfig({ theme: name });
+}
+function saveConfig(patch) {
+  Object.assign(config, patch);
+  lastLocalChange = Date.now();
+  if ("theme" in patch) store.set("cl.theme", config.theme);
+  if ("customText" in patch) store.set("cl.text", config.customText);
+  if ("showDetails" in patch) store.set("cl.details", config.showDetails ? "1" : "0");
+  if (online) fetch("config", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(patch) }).catch(() => {});
+  render();
+}
+
+/* ---------- live status polling ---------- */
+// One request at a time, each given POLL_TIMEOUT_MS; a reply that arrives after a newer request started is dropped.
+// When the server stops answering, the calendar and usage cards stay up for GRACE_MS (a restart or a blip shouldn't
+// blank them), and polls back off to every BACKOFF_MAX_MS.
+const POLL_TIMEOUT_MS = 3000, GRACE_MS = 10000, BACKOFF_MAX_MS = 5000;
+let polling = false, pollSeq = 0, pollFailures = 0, lastPollOk = 0, nextPollAt = 0;
+async function poll() {
+  if (location.protocol === "file:") { online = false; pollFailures = OFFLINE_SAVER_AFTER; refreshCanvases(); return render(); }
+  // Hidden (a screensaver page kept warm between runs): nothing to show; visibilitychange polls the moment it's back.
+  if (document.hidden || polling || Date.now() < nextPollAt) return;
+  polling = true;
+  const seq = ++pollSeq, abort = new AbortController(), timer = setTimeout(() => abort.abort(), POLL_TIMEOUT_MS);
+  try {
+    // The screensaver and the always-on display say when they're on screen, for the battery estimate.
+    const shown = SCREENSAVER ? "?shown=saver" : qs.has("display") ? "?shown=display" : "";
+    const r = await fetch(`status${shown}`, { cache: "no-store", signal: abort.signal });
+    if (!r.ok) throw new Error(r.status);
+    const j = await r.json();
+    if (seq !== pollSeq) return; // stale
+    online = true; pollFailures = 0; lastPollOk = Date.now(); nextPollAt = 0;
+    sessions = Array.isArray(j.sessions) ? j.sessions : [];
+    if (j.calendar && Array.isArray(j.calendar.events)) calendar = j.calendar;
+    usage = j.usage || null;
+    const c = j.config || {};
+    if (Date.now() - lastLocalChange > 3000) {
+      if (!themeFromUrl && c.theme && c.theme !== config.theme) setTheme(c.theme, false);
+      if (typeof c.customText === "string" && document.activeElement !== $("#customInput") && !qs.has("text")) config.customText = c.customText;
+      if (typeof c.showDetails === "boolean") { config.showDetails = c.showDetails; $("#details").checked = c.showDetails; }
+      if (typeof c.calTitles === "boolean") config.calTitles = c.calTitles;
+      if (typeof c.showUsage === "boolean") config.showUsage = c.showUsage;
+      config.powerSaver = c.powerSaver !== false;
+    }
+    onBattery = !!(j.battery && j.battery.onBattery);
+  } catch {
+    if (seq !== pollSeq) return;
+    online = false; pollFailures++;
+    if (Date.now() - lastPollOk > GRACE_MS) { calendar = { events: [], feeds: [] }; usage = null; }
+    nextPollAt = Date.now() + Math.min(BACKOFF_MAX_MS, 1000 * 2 ** (pollFailures - 1)) - 50; // 1, 2, 4, 5, 5… s
+  } finally {
+    clearTimeout(timer);
+    if (seq === pollSeq) polling = false;
+  }
+  refreshCanvases(); // on battery (or no server, see saving) the canvases drop to 1x
+  render();
+}
+
+/* ---------- picker UI ---------- */
+function buildPicker() {
+  const states = [["live", "Live"], ["working", "Working"], ["waiting", "Needs you"], ["done", "Done"], ["idle", "Idle"]];
+  $("#demoBtns").insertAdjacentHTML("beforeend", states.map(([k, l]) => `<button data-demo="${k}" aria-pressed="${k === "live"}">${l}</button>`).join("") +
+    `<label class="tog"><input type="checkbox" id="details"> Show details</label>`);
+  $("#demoBtns").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setDemo(b.dataset.demo === "live" ? null : b.dataset.demo); });
+  $("#details").checked = config.showDetails;
+  $("#details").addEventListener("change", (e) => saveConfig({ showDetails: e.target.checked }));
+  $("#customInput").value = config.customText;
+  const setText = () => saveConfig({ customText: $("#customInput").value.trim() });
+  $("#saveText").addEventListener("click", setText);
+  $("#clearText").addEventListener("click", () => { $("#customInput").value = ""; setText(); });
+  $("#customInput").addEventListener("keydown", (e) => { if (e.key === "Enter") setText(); e.stopPropagation(); });
+}
+function setDemo(kind) {
+  demo = kind; demoList = kind ? makeDemo(kind) : null;
+  document.querySelectorAll("#demoBtns button").forEach((b) => b.setAttribute("aria-pressed", String((b.dataset.demo === "live" && !kind) || b.dataset.demo === kind)));
+  render();
+}
+let hideTimer = 0;
+function wake() {
+  if (KIOSK || THUMB) return;
+  document.body.classList.remove("hide-cursor");
+  $("#picker").classList.add("show");
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(() => {
+    if ($("#picker").matches(":hover, :focus-within")) return wake();
+    $("#picker").classList.remove("show"); document.body.classList.add("hide-cursor");
+  }, 3500);
+}
+addEventListener("mousemove", wake);
+addEventListener("keydown", (e) => {
+  if (e.key === "d" || e.key === "D") { const order = [null, "working", "waiting", "done", "idle"]; setDemo(order[(order.indexOf(demo) + 1) % order.length]); }
+  else if (e.key === "h" || e.key === "H") saveConfig({ showDetails: !config.showDetails }), ($("#details").checked = config.showDetails);
+  else if (e.key === "f" || e.key === "F") document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.();
+  else return;
+  wake();
+});
+
+/* ---------- message strip: every letter is a prop, the bat is the performer ---------- */
+const fx = $("#fx"), fxg = fx.getContext("2d");
+const ease = (p) => (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2);
+const seg = (p, a, b) => clamp((p - a) / (b - a), 0, 1);
+const backOut = (p) => 1 + 2.70158 * Math.pow(p - 1, 3) + 1.70158 * Math.pow(p - 1, 2);
+const spring = (p) => Math.exp(-5 * p) * Math.cos(16 * p);
+const SCRAMBLE = "!<>-_/[]{}=+*^?#%01✺";
+const note = {
+  text: null, letters: [], fs: 24, ps: 3, anim: null, at: 0, gap: 1.2, lastIdx: -1, crumbs: [], dir: 1, // dir: 1 left-to-right, -1 right-to-left
+  crab: { x: 0, y: 0, vis: 0, pose: "normal", leg: 0, rot: 0, sy: 1, top: false },
+};
+const blankFx = () => ({ dx: 0, dy: 0, rot: 0, sx: 1, sy: 1, op: 1, glyph: null, color: null });
+const resetFx = (F) => { F.dx = F.dy = F.rot = 0; F.sx = F.sy = F.op = 1; F.glyph = F.color = null; }; // in place: no garbage per frame
+
+// Right-to-left text (Hebrew, Arabic…): the letters are inline blocks, which the bidi algorithm treats
+// as neutral, so the browser can't order them by itself. Each run of words in one direction gets its own
+// isolated, dir-tagged span (so a Hebrew message with an English word in it reads right), letters split
+// on whole characters (Hebrew points and emoji stay in one piece), and joining scripts keep each word whole
+// so Arabic letters still connect.
+const RTL_CH = /[\p{Script=Hebrew}\p{Script=Arabic}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Samaritan}\p{Script=Mandaic}\p{Script=Adlam}]/u;
+const JOINING = /[\p{Script=Arabic}\p{Script=Syriac}\p{Script=Nko}\p{Script=Mandaic}\p{Script=Adlam}\p{Script=Mongolian}]/u;
+const graphemes = (str) => (typeof Intl.Segmenter === "function" ? [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(str)].map((g) => g.segment) : [...str]);
+function strongDir(str) {
+  for (const ch of str) { if (RTL_CH.test(ch)) return "rtl"; if (/\p{L}/u.test(ch)) return "ltr"; }
+  return null; // digits, punctuation and emoji take the direction around them
+}
+function buildNote(text) {
+  note.text = text;
+  const box = $("#msg");
+  box.textContent = "";
+  note.letters = [];
+  const para = strongDir(text) || "ltr";
+  box.dir = para; note.dir = para === "rtl" ? -1 : 1;
+  let run = null, space = false;
+  const parts = text.split(/(\s+)/).filter(Boolean), dirs = parts.map((p) => (/^\s+$/.test(p) ? null : strongDir(p)));
+  parts.forEach((part, i) => {
+    if (/^\s+$/.test(part)) { space = true; return; }
+    // Like the bidi algorithm: a word with no letters of its own (digits, emoji) goes with its neighbours
+    // when both sides run the same way, otherwise with the message's direction.
+    const next = dirs.slice(i + 1).find(Boolean) || para;
+    const dir = dirs[i] || (run && run.dir === next ? run.dir : para);
+    if (!run || run.dir !== dir) {
+      if (run && space) box.append(" ");
+      run = document.createElement("span"); run.dir = dir; box.append(run);
+    } else if (space) run.append(" ");
+    space = false;
+    const word = document.createElement("span");
+    word.className = "word"; word.dir = dir;
+    // Inside a word, a stretch in the other direction (digits in Hebrew, "ב-Zoom") gets its own span.
+    let sub = null;
+    for (const ch of JOINING.test(part) ? [part] : graphemes(part)) {
+      const d = strongDir(ch) || (/\p{N}/u.test(ch) ? "ltr" : sub ? sub.dir : dir);
+      if (d === dir) sub = null;
+      else if (!sub || sub.dir !== d) { sub = document.createElement("span"); sub.dir = d; word.append(sub); }
+      const el = document.createElement("span");
+      el.className = "ch"; el.textContent = ch;
+      (sub || word).append(el);
+      note.letters.push({ el, ch, fx: blankFx() });
+    }
+    run.append(word);
+  });
+  note.anim = null; note.gap = 1.2; note.crab.vis = 0; note.rest = false;
+  $("#note").hidden = !text;
+  requestAnimationFrame(() => { measureNote(); measure(); });
+}
+function measureNote() {
+  if (!note.letters.length) return; // offsets ignore transforms, so this is safe mid-animation
+  const box = $("#msg").getBoundingClientRect(), { s, ox, oy } = noteFit; // positions as if unscaled (see noteFit)
+  const r = { left: ox + (box.left - ox) / s, top: oy + (box.top - oy) / s };
+  note.fs = parseFloat(getComputedStyle($("#msg")).fontSize) || 24;
+  note.ps = Math.max(2, Math.round(note.fs / 9));
+  for (const L of note.letters) {
+    const e = L.el;
+    L.x = r.left + e.offsetLeft; L.w = e.offsetWidth; L.h = e.offsetHeight;
+    L.top = r.top + e.offsetTop; L.bot = L.top + L.h;
+    L.cx = L.x + L.w / 2; L.cy = L.top + L.h / 2; L.cap = L.top + L.h * 0.16; L.line = Math.round(L.top);
+  }
+  // The bat walks the letters in reading order: lines top to bottom, each line in the message's direction.
+  const band = note.fs * 0.5;
+  note.letters.sort((a, b) => Math.round(a.top / band) - Math.round(b.top / band) || (a.cx - b.cx) * note.dir);
+}
+// Point on top of the text at fractional letter index u (extends past both ends; hops between lines).
+function pathPos(u) {
+  const Ls = note.letters, n = Ls.length, step = note.fs * 0.7;
+  if (u <= 0) return { x: Ls[0].cx + u * step * note.dir, y: Ls[0].cap };
+  if (u >= n - 1) return { x: Ls[n - 1].cx + (u - n + 1) * step * note.dir, y: Ls[n - 1].cap };
+  const i = Math.floor(u), f = u - i, A = Ls[i], B = Ls[i + 1];
+  const hop = A.line === B.line ? 0 : Math.sin(f * Math.PI) * note.fs * 1.3;
+  return { x: A.cx + (B.cx - A.cx) * f, y: A.cap + (B.cap - A.cap) * f - hop };
+}
+function walkCrab(u, t, legSpeed = 10) {
+  const P = pathPos(u);
+  Object.assign(note.crab, { x: P.x, y: P.y - Math.abs(Math.sin(u * Math.PI)) * note.ps * 1.2, pose: "normal", leg: Math.floor(t * legSpeed) % 2, rot: 0, sy: 1, top: false });
+}
+function pickLetter(a, b) {
+  const n = note.letters.length;
+  const pool = note.letters.map((L, i) => i).filter((i) => i >= Math.floor(n * a) && i <= Math.ceil(n * b) - 1 && /[\p{L}\p{N}]/u.test(note.letters[i].ch));
+  return pool.length ? pick(pool) : Math.floor(n / 2);
+}
+function spawnCrumbs(x, y, count) {
+  for (let i = 0; i < count; i++) note.crumbs.push({ x, y, vx: rand(-110, 110), vy: rand(-190, -50), life: rand(0.5, 0.9) });
+}
+
+const NOTE_ANIMS = [
+  { // Parade: marches across the tops, squashing each letter and leaving a wave behind.
+    dur: 6.5,
+    update(p, N, t) {
+      const n = N.letters.length, u = -1.5 + ease(seg(p, 0, 0.95)) * (n + 2);
+      walkCrab(u, t);
+      N.crab.vis = Math.min(seg(p, 0, 0.05), 1 - seg(p, 0.93, 1));
+      N.letters.forEach((L, i) => {
+        const d = u - i, F = L.fx;
+        if (Math.abs(d) < 0.55) Object.assign(F, { dy: N.fs * 0.07, sy: 0.82, sx: 1.12 });
+        else if (d > 0) { const r = Math.sin(d * 1.7) * Math.exp(-d * 0.42); F.dy = -r * N.fs * 0.28; F.rot = r * 8; }
+      });
+    },
+  },
+  { // Bite & hang: bites a letter, swings from it, drops off; the letter springs back.
+    dur: 8,
+    start(N) { N.k = pickLetter(0.3, 0.7); },
+    update(p, N, t) {
+      const k = N.k, L = N.letters[k], c = N.crab, F = L.fx, pull = N.fs * 0.4;
+      if (p < 0.24) { walkCrab(-1.5 + ease(seg(p, 0, 0.24)) * (k + 1.5), t); c.vis = seg(p, 0, 0.04); return; }
+      if (p < 0.33) {
+        walkCrab(k, t); c.leg = 0; c.pose = Math.floor(t * 9) % 2 ? "wave" : "normal";
+        F.rot = Math.sin(t * 60) * 5; F.sy = 0.9;
+        return;
+      }
+      if (p < 0.82) {
+        const s = seg(p, 0.33, 0.82), sw = Math.sin(s * 22) * 0.55 * (1 - s * 0.6), tip = backOut(seg(p, 0.33, 0.4));
+        F.dy = pull * tip; F.rot = (18 + sw * 16) * tip;
+        if (N.letters[k - 1]) N.letters[k - 1].fx.rot = 5 * tip;
+        if (N.letters[k + 1]) N.letters[k + 1].fx.rot = -5 * tip;
+        Object.assign(c, { top: true, x: L.cx, y: L.bot + F.dy - N.fs * 0.12, rot: sw, pose: "wave", leg: Math.floor(t * 6) % 2, sy: 1, vis: 1 });
+        return;
+      }
+      const s = seg(p, 0.82, 1), fallT = (p - 0.82) * this.dur;
+      F.dy = pull * spring(s * 1.4); F.rot = 18 * spring(s * 1.4);
+      Object.assign(c, { top: true, x: L.cx + fallT * 40 * N.dir, y: L.bot - N.fs * 0.12 + 0.5 * 1900 * fallT * fallT, rot: fallT * 7, pose: "normal", vis: 1 - s });
+    },
+  },
+  { // Chomp: eats the message letter by letter, burps, then spits every letter back into place.
+    dur: 8.5,
+    start(N) { N.eaten = 0; },
+    update(p, N, t) {
+      const n = N.letters.length, c = N.crab, last = N.letters[n - 1];
+      if (p < 0.5) {
+        const u = -1.2 + ease(seg(p, 0, 0.5)) * (n + 0.4), near = N.letters[clamp(Math.round(u), 0, n - 1)];
+        Object.assign(c, { x: pathPos(u).x, y: near.bot + N.ps, top: false, rot: 0, sy: 1, leg: Math.floor(t * 10) % 2, pose: Math.floor(t * 8) % 2 ? "wave" : "normal", vis: seg(p, 0, 0.04) });
+        let eaten = 0;
+        N.letters.forEach((L, i) => {
+          const d = u - i, F = L.fx;
+          if (d > 0.15) { F.sx = F.sy = 0; F.op = 0; eaten++; }
+          else if (d > -0.5) { const s = (0.15 - d) / 0.65; F.sx = F.sy = s; F.rot = (1 - s) * -25; }
+        });
+        while (N.eaten < eaten) { N.eaten++; spawnCrumbs(c.x + N.ps * 6 * N.dir, c.y - N.ps * 5, 7); }
+        return;
+      }
+      Object.assign(c, {
+        x: last.cx + N.fs * 0.9 * N.dir, y: last.bot + N.ps, leg: 0, top: false, rot: 0,
+        sy: p < 0.58 ? 1 + Math.sin(seg(p, 0.5, 0.58) * Math.PI) * 0.3 : 1,
+        pose: p > 0.58 && p < 0.93 ? (Math.floor(t * 10) % 2 ? "wave" : "normal") : "normal",
+        vis: 1 - seg(p, 0.95, 1),
+      });
+      N.letters.forEach((L, i) => {
+        // Spat back in place one by one: an English message from the bat's end, a right-to-left one in
+        // reading order (from the right), so it builds the way it reads.
+        const order = N.dir < 0 ? i : n - 1 - i;
+        const s0 = 0.58 + (order / Math.max(1, n)) * 0.32, e = seg(p, s0, s0 + 0.07), F = L.fx;
+        if (e <= 0) { F.sx = F.sy = 0; F.op = 0; return; }
+        const mx = c.x - N.ps * 5 * N.dir, my = c.y - N.ps * 5;
+        Object.assign(F, { dx: (mx - L.cx) * (1 - e), dy: (my - L.bot) * (1 - e) - Math.sin(e * Math.PI) * N.fs * 0.9, rot: (1 - e) * -300, sx: Math.max(0.01, backOut(e)), sy: Math.max(0.01, backOut(e)) });
+      });
+    },
+  },
+  { // Decode: the text scrambles into glyphs and resolves behind the flitting bat.
+    dur: 6,
+    update(p, N, t) {
+      const n = N.letters.length, u = -1.5 + seg(p, 0, 0.85) * (n + 2.5);
+      walkCrab(u, t, 14);
+      N.crab.vis = Math.min(seg(p, 0, 0.05), 1 - seg(p, 0.92, 1));
+      N.letters.forEach((L, i) => {
+        const d = u - i, F = L.fx;
+        if (d < 0) {
+          if (!L.scr || Math.random() < 0.2) L.scr = SCRAMBLE[Math.floor(Math.random() * SCRAMBLE.length)];
+          Object.assign(F, { glyph: L.scr, color: "var(--accent)", op: 0.85 });
+        } else if (d < 1.2) { F.sy = 1 + (1.2 - d) * 0.25; F.dy = -(1.2 - d) * N.fs * 0.12; }
+      });
+    },
+  },
+  { // Kick: punts three letters into spinning flips that land with a squash.
+    dur: 7,
+    start(N) { N.ks = [...new Set([0, 1, 2].map((a) => pickLetter(a / 3, (a + 1) / 3)))].sort((a, b) => a - b); },
+    update(p, N, t) {
+      const c = N.crab, per = 0.9 / N.ks.length;
+      let prev = -1.5, placed = false;
+      N.ks.forEach((k, j) => {
+        const s0 = j * per, walkEnd = s0 + per * 0.5, target = k - 0.75;
+        if (!placed && p < walkEnd) { walkCrab(prev + ease(seg(p, s0, walkEnd)) * (target - prev), t); placed = true; }
+        else if (!placed && p < s0 + per) { walkCrab(target, t); c.leg = 0; c.pose = "wave"; placed = true; }
+        const e = seg(p, walkEnd, walkEnd + per * 0.9), F = N.letters[k].fx;
+        if (e > 0 && e < 1) Object.assign(F, { dy: -Math.sin(e * Math.PI) * N.fs * 2.4, dx: Math.sin(e * Math.PI * 2) * N.fs * 0.2, rot: e * 720 });
+        const q = seg(p, walkEnd + per * 0.9, walkEnd + per * 1.05);
+        if (q > 0 && q < 1) { F.sy = 1 - 0.35 * Math.sin(q * Math.PI); F.sx = 1 + 0.2 * Math.sin(q * Math.PI); }
+        prev = target;
+      });
+      if (!placed) walkCrab(prev + ease(seg(p, 0.9, 1)) * 4, t);
+      c.vis = Math.min(seg(p, 0, 0.04), 1 - seg(p, 0.95, 1));
+    },
+  },
+  { // Weightlifting: pops up under the message, hoists the middle, drops it, wobbles off dizzy.
+    dur: 6.5,
+    update(p, N, t) {
+      const n = N.letters.length, c = N.crab, mid = (n - 1) / 2, Lm = N.letters[Math.round(mid)];
+      const sigma = Math.max(2, n / 4), lift = p < 0.15 ? 0 : p < 0.7 ? backOut(seg(p, 0.15, 0.3)) : 0, drop = seg(p, 0.7, 1);
+      N.letters.forEach((L, i) => {
+        const w = Math.exp(-((i - mid) ** 2) / (2 * sigma * sigma)), F = L.fx;
+        if (p < 0.7) { F.dy = -N.fs * 0.55 * lift * w + (lift ? rand(-1, 1) : 0); F.rot = lift * w * Math.sin(t * 30 + i) * 2.5; }
+        else F.dy = -N.fs * 0.55 * w * spring(drop * 1.6);
+      });
+      const rise = 1 - ease(seg(p, 0, 0.15)), squash = Math.max(0, Math.sin(seg(p, 0.7, 0.8) * Math.PI));
+      Object.assign(c, {
+        top: false, pose: p < 0.8 ? "wave" : "normal", leg: p > 0.85 ? Math.floor(t * 10) % 2 : 0,
+        x: Lm.cx + (lift ? rand(-1, 1) * N.ps * 0.6 : 0) + seg(p, 0.85, 1) * N.fs * 3 * N.dir,
+        y: Lm.bot + 9 * N.ps + rise * N.fs * 1.6 - N.fs * 0.55 * lift,
+        sy: (lift ? 0.94 : 1) - 0.45 * squash,
+        rot: Math.sin(t * 8) * 0.3 * seg(p, 0.78, 0.85) * (1 - seg(p, 0.9, 1)),
+        vis: Math.min(seg(p, 0, 0.08), 1 - seg(p, 0.9, 1)),
+      });
+    },
+  },
+];
+
+// Perf: the strip's canvas covers the screen but only ever holds the bat and its crumbs, so each frame clears just
+// the box they were drawn in (with a margin), and an empty canvas isn't touched at all. Clearing all of it every
+// frame cost more than everything drawn on it.
+let fxDirty = null;
+function stepNote(t, dt) {
+  if (fxDirty) { fxg.clearRect(fxDirty.x, fxDirty.y, fxDirty.w, fxDirty.h); fxDirty = null; }
+  const N = note;
+  if (!N.letters.length || REDUCED || $("#note").hidden) return;
+  // Between animations the letters stand still: once they've been put back (N.rest), they aren't touched again.
+  if (N.anim || !N.rest) for (const L of N.letters) resetFx(L.fx);
+  if (!N.anim) {
+    N.crab.vis = 0;
+    N.gap -= dt;
+    if (N.gap <= 0) {
+      measureNote();
+      let i;
+      do i = Math.floor(Math.random() * NOTE_ANIMS.length); while (i === N.lastIdx && NOTE_ANIMS.length > 1);
+      N.lastIdx = i; N.anim = NOTE_ANIMS[i]; N.at = 0;
+      N.anim.start?.(N);
+    }
+  }
+  if (N.anim) {
+    N.at += dt;
+    const p = Math.min(1, N.at / N.anim.dur);
+    N.anim.update(p, N, t, dt);
+    if (p >= 1) { N.anim = null; N.gap = 1.6; N.crab.vis = 0; for (const L of N.letters) resetFx(L.fx); }
+  }
+  if (N.anim || !N.rest) for (const L of N.letters) {
+    const F = L.fx;
+    const tf = F.dx || F.dy || F.rot || F.sx !== 1 || F.sy !== 1
+      ? `translate(${F.dx.toFixed(1)}px,${F.dy.toFixed(1)}px) rotate(${F.rot.toFixed(1)}deg) scale(${F.sx.toFixed(3)},${F.sy.toFixed(3)})` : "";
+    if (tf !== L.tf) { L.el.style.transform = tf; L.tf = tf; }
+    const op = F.op === 1 ? "" : F.op.toFixed(2);
+    if (op !== L.op) { L.el.style.opacity = op; L.op = op; }
+    const glyph = F.glyph || L.ch;
+    if (L.el.textContent !== glyph) {
+      L.el.textContent = glyph;
+      L.el.style.width = F.glyph ? `${L.w}px` : ""; // scrambled glyphs keep the real letter's width
+    }
+    const col = F.color || "";
+    if (col !== L.col) { L.el.style.color = col; L.col = col; }
+  }
+  N.rest = !N.anim;
+  const pal = PAL[config.theme], c = N.crab, ps = N.ps;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const mark = (x, y, r) => { x0 = Math.min(x0, x - r); y0 = Math.min(y0, y - r); x1 = Math.max(x1, x + r); y1 = Math.max(y1, y + r); };
+  fxg.save();
+  if (noteFit.s !== 1) { fxg.translate(noteFit.ox, noteFit.oy); fxg.scale(noteFit.s, noteFit.s); fxg.translate(-noteFit.ox, -noteFit.oy); }
+  fxg.fillStyle = pal.accent;
+  let expired = false;
+  for (const k of N.crumbs) if ((k.life -= dt) <= 0) expired = true;
+  if (expired) N.crumbs = N.crumbs.filter((k) => k.life > 0);
+  for (const k of N.crumbs) {
+    k.vy += 700 * dt; k.x += k.vx * dt; k.y += k.vy * dt;
+    fxg.globalAlpha = Math.min(1, k.life * 2); fxg.fillRect(k.x, k.y, ps, ps);
+    mark(k.x, k.y, ps * 2);
+  }
+  fxg.globalAlpha = 1;
+  if (c.vis > 0.01) {
+    fxg.save(); fxg.globalAlpha = c.vis; fxg.translate(c.x, c.y); fxg.rotate(c.rot); fxg.scale(1, c.sy);
+    drawCrab(fxg, 0, c.top ? 9 * ps : 0, ps, c.pose, c.leg, pal.crab, pal.eye, false);
+    fxg.restore();
+    mark(c.x, c.y, ps * 20 * Math.max(1, c.sy)); // the sprite is at most 18 x 9 pixels from here, rotated and stretched
+  }
+  fxg.restore();
+  if (x0 < x1) { // in screen space: the strip's scale (noteFit) applies to all of it
+    const { s, ox, oy } = noteFit, X = (x) => ox + (x - ox) * s, Y = (y) => oy + (y - oy) * s;
+    const left = Math.floor(X(x0)) - 2, top = Math.floor(Y(y0)) - 2;
+    fxDirty = { x: left, y: top, w: Math.ceil(X(x1)) + 2 - left, h: Math.ceil(Y(y1)) + 2 - top };
+  }
+}
+
+/* ---------- boot ---------- */
+buildPicker();
+setTheme(config.theme, false);
+if (qs.get("demo")) setDemo(qs.get("demo"));
+if ((KIOSK && !PREVIEW) || THUMB) document.body.classList.add("hide-cursor");
+resize();
+addEventListener("resize", resize);
+document.fonts?.ready.then(measure);
+document.fonts?.addEventListener?.("loadingdone", measure);
+// The page starts with the text hidden (class on <html>). resize() above laid it out, which started loading the fonts
+// it uses; show the text once they're in (2 s at most, e.g. offline), already measured.
+Promise.race([document.fonts ? document.fonts.ready : null, new Promise((r) => setTimeout(r, 2000))])
+  .then(() => { measure(); document.documentElement.classList.remove("fonts-wait"); });
+watchPixelRatio();
+poll();
+setInterval(poll, 1000);
+// The screensaver keeps this page alive, hidden, between activations: the frame loop stops while it's hidden
+// (frame() doesn't reschedule itself), and restarts, and refreshes, the moment it shows.
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  last = performance.now(); // no jump: the first frame back steps from now
+  if (!rafId) rafId = requestAnimationFrame(frame);
+  nextPollAt = 0; poll();
+});
+setInterval(() => { verbIdx++; if (current.state === "working") render(); }, 3800);
+setInterval(() => { idleIdx++; if (current.state === "idle") render(); }, 9000);
+
+let last = performance.now(), rafId = 0;
+function frame(now) {
+  if (document.hidden) { rafId = 0; return; } // paused; visibilitychange starts it again
+  if (THUMB && now - last < 50) return (rafId = requestAnimationFrame(frame)); // ~20fps is plenty for a thumbnail
+  if (saving() && now - last < 1000 / 30 - 2) return (rafId = requestAnimationFrame(frame)); // power saver: 30fps
+  const dt = clamp((now - last) / 1000, 0, 0.05); last = now; // rAF timestamps can precede `last`
+  const t = now / 1000;
+  const S = { state: current.state, hero: heroParams(t, dt, current.state), crabTarget: L.hx, live: current.live, focus: current.focus };
+  rafId = requestAnimationFrame(frame);
+  stepTweens(now);
+  stepCarousel(dt);
+  stepLockUI();
+  for (const sp of spinners) sp.style.transform = `rotate(${(t * 300) % 360}deg)`;
+  stepMarquees(t);
+  try { THEME_IMPL[config.theme].draw(ctx, t, dt, S); } catch (err) { console.error(err); THEME_IMPL[config.theme].init(); }
+  try { stepNote(t, dt); } catch (err) { console.error(err); note.anim = null; }
+}
+rafId = requestAnimationFrame(frame);
+setInterval(() => document.hidden || measure(), 2000);
+/* ---------- preview: macOS's lock UI on hover ---------- */
+// In the app's Lock Screen Preview, pointing at the scene works like touching a locked Mac: macOS draws its clock,
+// your picture, name and password field over the screensaver (drawn here like the website demo does), and the page
+// makes room exactly as on the real lock screen. They go 29.4 s after the last input, or when the pointer leaves,
+// so both looks can be checked: the screensaver alone, and with macOS's sign-in on top.
+if (PREVIEW) {
+  const css = document.createElement("style");
+  css.textContent = `
+    .pv-mac { position: fixed; inset: 0; z-index: 50; pointer-events: none; color: #fff; text-align: center;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif; text-shadow: 0 1px 12px rgba(0, 0, 0, .25);
+      opacity: 0; transition: opacity .45s ease; }
+    .pv-mac.on { opacity: 1; }
+    .pv-mac-clock { position: absolute; left: 0; right: 0; top: 54px; }
+    .pv-mac-date { font-size: 24px; font-weight: 600; opacity: .88; }
+    .pv-mac-time { margin-top: -6px; font-size: 128px; line-height: 1.05; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; opacity: .92; }
+    .pv-mac-login { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); display: grid; justify-items: center; gap: 8px; }
+    .pv-mac-pfp { width: 56px; height: 56px; border-radius: 50%; overflow: hidden; background: linear-gradient(180deg, #b8bec7, #8a919c); box-shadow: 0 4px 14px rgba(0, 0, 0, .3); }
+    .pv-mac-pfp svg { width: 100%; height: 100%; fill: #eef0f3; }
+    .pv-mac-name { font-size: 15px; font-weight: 600; }
+    .pv-mac-field { width: 172px; padding: 6px 14px; border-radius: 999px; background: rgba(255, 255, 255, .22); backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px); font-size: 13px; color: rgba(255, 255, 255, .62); text-align: left; text-shadow: none; }
+    .pv-mac-hint { font-size: 12px; opacity: .72; }
+    @media (prefers-reduced-motion: reduce) { .pv-mac { transition: none; } }`;
+  document.head.append(css);
+  const mac = document.createElement("div");
+  mac.className = "pv-mac";
+  mac.setAttribute("aria-hidden", "true");
+  mac.innerHTML = `<div class="pv-mac-clock"><div class="pv-mac-date"></div><div class="pv-mac-time"></div></div>
+    <div class="pv-mac-login"><div class="pv-mac-pfp"><svg viewBox="0 0 64 64"><circle cx="32" cy="25" r="11"/><path d="M12 54c2-11 10-17 20-17s18 6 20 17"/></svg></div>
+    <div class="pv-mac-name"></div><div class="pv-mac-field">Enter Password</div><div class="pv-mac-hint">Touch ID or Enter Password</div></div>`;
+  mac.querySelector(".pv-mac-name").textContent = qs.get("user") || "Your Name";
+  document.body.append(mac);
+
+  const LOCK_UI_TIMEOUT = 29400; // what loginwindow uses (see the screensaver)
+  let lastInput = 0, shown = false;
+  const show = (on) => {
+    if (on === shown) return;
+    shown = on;
+    mac.classList.toggle("on", on);
+    window.setSystemLockUI(on);
+  };
+  const touched = () => { lastInput = Date.now(); show(true); };
+  for (const ev of ["pointerenter", "pointermove", "pointerdown", "keydown", "wheel"]) document.addEventListener(ev, touched, { passive: true });
+  document.documentElement.addEventListener("pointerleave", () => show(false));
+  addEventListener("blur", () => show(false));
+  setInterval(() => { if (shown && Date.now() - lastInput >= LOCK_UI_TIMEOUT) show(false); }, 100);
+  // macOS's lock-screen clock: date above, hours and minutes without AM/PM.
+  const tick = () => {
+    const now = new Date();
+    mac.querySelector(".pv-mac-date").textContent = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+    mac.querySelector(".pv-mac-time").textContent = new Intl.DateTimeFormat([], { hour: "numeric", minute: "2-digit" })
+      .formatToParts(now).filter((x) => x.type !== "dayPeriod").map((x) => x.value).join("").trim();
+  };
+  tick();
+  setInterval(tick, 1000);
+}
+</script>
+</body>
+</html>
